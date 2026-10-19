@@ -27,6 +27,23 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
 - **空闲**：没有变化时零唤醒、零渲染，由测试保证。
 - **effect** 在这一帧写到终端之后执行。清理靠返回值的 `Drop`；组件卸载时它的异步任务随 drop 取消。
 
+## 事件循环
+
+核心是步进式的，不拥有循环：
+
+- `dispatch(event)` 处理一个事件，`render_if_due(now)` 在需要时渲染一帧，返回下一次需要唤醒的时间 `Option<Instant>`，`None` 表示空闲。驱动按这个时间睡眠，空闲零唤醒由它保证。
+- 核心定义唤醒接口。其他线程经 `AppHandle` 提交更新，或 UI 线程上的任务写 `State`，两种情况通过它叫醒驱动。
+- 调度规则（批量更新、`max_fps`、空闲零唤醒）写在核心里，与驱动无关。测试驱动手动推进循环和假时钟。
+
+驱动有两个：
+
+- **同步驱动**：UI 线程跑循环，一个线程阻塞读 crossterm 事件。异步结果经 `AppHandle` 送回 UI 线程。
+- **tokio 驱动**（feature `tokio`，默认开启）：UI 循环跑在 `LocalSet` 上，`spawn_local` 派生的任务与 UI 同线程，可以写 `State`。任务句柄 drop 时 abort，组件卸载时任务随之取消。输入用 crossterm 的 `event-stream`。
+
+CI 跑一遍 `--no-default-features`，覆盖同步驱动。
+
+不以 tokio 为核心的理由：从步进式核心加 tokio 写法是多写一个驱动，从 tokio 核心退回运行时无关要改公开 API；调度顺序由自己的循环决定，不交给 `select!`；测试可以按确定的顺序推进循环。
+
 ## 写法
 
 `Box` 与 `std::boxed::Box` 重名，改叫 `View`（同 React Native）。v1 的写法是 builder：rustfmt 能格式化，rust-analyzer 能补全，编译器能检查类型。宏 DSL 放到 M5，作为 builder 的语法糖，能力不超出 builder。
@@ -53,7 +70,7 @@ M0 的 API（`src/lib.rs`）：
 - `Text` 的子节点是 `TextChild`：字符串、嵌套的 `Text`/`Transform`、`Newline`，或渲染成文本的 `Element`。
 - `render_to_string(element, RenderOptions { columns, color_level })`：Static 输出在前，行尾没有多余空格（带样式的格子除外），末尾没有换行。
 
-包名 `ink-rs`，lib 名 `ink_rs`。crates.io 上的 `ink` 属于 Parity 的智能合约框架。
+包名 `ink-rs`，lib 名 `ink_rs`。crates.io 上的 `ink` 属于 Parity 的智能合约框架 ink!，对外介绍时注明两者无关。
 
 ## 布局与文本
 
@@ -74,7 +91,7 @@ M0 的 API（`src/lib.rs`）：
 
 ## 输入
 
-crossterm 负责读事件和切换终端模式（含 Windows），不负责画面输出。hooks 与 Ink 对应：`use_input`、`use_paste`、`use_focus` / `use_focus_manager`、`use_app`、`use_window_size`、`use_box_metrics`、`use_animation`（所有动画共用一个定时器）。存在活跃的 `use_input` 时进入 raw mode，没有时不进入。
+crossterm 负责读事件和切换终端模式，不负责画面输出。hooks 与 Ink 对应：`use_input`、`use_paste`、`use_focus` / `use_focus_manager`、`use_app`、`use_window_size`、`use_box_metrics`、`use_animation`（所有动画共用一个定时器）。存在活跃的 `use_input` 时进入 raw mode，没有时不进入。
 
 ## 测试
 
@@ -107,7 +124,6 @@ Ink 的测试是规格，分四层：
 | M4 | 动画、元素尺寸测量、panic 时的错误界面、挂起恢复、异步接入；移植 Ink 的示例 | 逐个对照示例 |
 | M5 | 宏 DSL、屏幕阅读器模式 | — |
 
-## 待定
+## 平台
 
-- **异步。** 倾向：UI 线程跑同步事件循环（对应 Node 的事件循环），tokio 作为可选 feature，`use_future` 的结果经 `AppHandle` 送回 UI 线程。另一条路是基于 tokio 起步，API 更顺，代价是绑定运行时。M1 前决定。
-- **Windows。** crossterm 解决大部分差异，代价是多测一套终端。M2 前决定。
+v1 支持 Linux 和 macOS，不支持 Windows。终端模式、SIGCONT、挂起这类 Unix 专属代码放在 `cfg(unix)` 后面，不写 Windows 分支，以后支持 Windows 时改动集中在这几处。
