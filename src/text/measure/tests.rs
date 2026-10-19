@@ -2,6 +2,10 @@
 
 use super::*;
 
+fn measure_text(text: &str) -> TextSize {
+    super::measure_text(&crate::text::styled::parse(text))
+}
+
 #[test]
 fn measure_single_word() {
     assert_eq!(

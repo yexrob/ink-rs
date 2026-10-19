@@ -2,6 +2,15 @@
 
 use super::*;
 
+fn wrap_text(text: &str, max_width: usize, wrap: TextWrap) -> String {
+    let lines = crate::text::styled::parse(text);
+    super::wrap_text(&lines, max_width, wrap)
+        .iter()
+        .map(|line| crate::text::styled::serialize(line))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[test]
 fn wraps_text() {
     assert_eq!(
