@@ -175,6 +175,45 @@ pub(crate) struct StyledChar {
 pub(crate) type StyledLine = Vec<StyledChar>;
 pub(crate) type StyledText = Vec<StyledLine>;
 
+/// Concatenation joins the boundary lines; explicit line breaks remain intact.
+pub(crate) fn append(target: &mut StyledText, source: StyledText) {
+    let mut lines = source.into_iter();
+    if let Some(first) = lines.next() {
+        if let Some(last) = target.last_mut() {
+            for cell in first {
+                append_cell(last, cell);
+            }
+        } else {
+            target.push(first);
+        }
+        target.extend(lines);
+    }
+}
+
+fn append_cell(line: &mut StyledLine, cell: StyledChar) {
+    let Some(previous) = line.last_mut() else {
+        line.push(cell);
+        return;
+    };
+    // Inline boundaries are not grapheme boundaries: a mark, ZWJ sequence, or
+    // flag can continue the preceding span. Its first scalar owns the style.
+    let boundary = previous.grapheme.len();
+    let joined = format!("{}{}", previous.grapheme, cell.grapheme);
+    let mut graphemes = joined.grapheme_indices(true);
+    let (_, first) = graphemes.next().unwrap();
+    if first.len() == boundary {
+        line.push(cell);
+        return;
+    }
+    previous.grapheme = first.to_owned();
+    previous.width = grapheme_width(first);
+    line.extend(graphemes.map(|(_, grapheme)| StyledChar {
+        grapheme: grapheme.to_owned(),
+        width: grapheme_width(grapheme),
+        style: cell.style.clone(),
+    }));
+}
+
 /// External strings enter here, including Transform results. Tabs remain cells
 /// until the assembled inline line has its final tab-stop origin.
 pub(crate) fn parse(text: &str) -> StyledText {
