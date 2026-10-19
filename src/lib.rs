@@ -7,16 +7,13 @@
 //!
 //! See `docs/design.md` for the architecture and the milestone plan.
 
-// Skeleton stage: nothing reads the element data or calls the text
-// functions until the M0 pipeline lands. Remove with the first implementation.
-#![allow(dead_code)]
-
 mod border;
 mod color;
 mod components;
 mod element;
 mod host;
 mod layout;
+mod paint;
 mod render;
 mod style;
 mod text;

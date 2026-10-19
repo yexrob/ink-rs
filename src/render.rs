@@ -1,4 +1,4 @@
-use crate::{ColorLevel, Element};
+use crate::{ColorLevel, Element, host, layout, paint};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RenderOptions {
@@ -23,6 +23,7 @@ impl Default for RenderOptions {
 ///
 /// [`Static`]: crate::Static
 pub fn render_to_string(element: impl Into<Element>, options: RenderOptions) -> String {
-    let _ = (element.into(), options);
-    todo!()
+    let (mut tree, root) = host::build(element.into(), options.columns, options.color_level);
+    layout::compute(&mut tree, root);
+    paint::paint(&tree, root, options.color_level).serialize()
 }
