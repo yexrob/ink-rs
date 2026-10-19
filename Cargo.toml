@@ -5,3 +5,6 @@ edition = "2024"
 description = "Build terminal user interfaces with components, in the spirit of Ink"
 
 [dependencies]
+taffy = { version = "0.15", default-features = false, features = ["std", "taffy_tree", "flexbox"] }
+unicode-segmentation = "1.13"
+unicode-width = "0.2"
