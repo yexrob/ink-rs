@@ -233,13 +233,16 @@ Ink 有 95 个测试文件、1,646 个测试。
 - **非 SGR 序列的检查不变。** `text.tsx` 中检查光标移动、DCS、SOS 等序列被剥离、OSC 超链接被保留的断言，与 Ink 一样用 `contains`。
 - **`colorize.ts`**：Rust 版测颜色字符串的解析（`"…".parse::<Color>()`），生成 SGR 的部分由渲染测试覆盖。
 - **`borders.tsx` 的竖边框用例**：Ink 的正则含未转义的 `|`，断言弱于测试名的意图。移植版比较 7 行完整输出。
+- **`text.tsx` 的 hex、rgb、ansi256 颜色用例（6 个）**：Ink 的期望值由同一个 chalk 实例生成，与色彩级别无关。移植版的期望值是 truecolor 的输出，调用改用 `render_truecolor`。
+- **`background.tsx` 中 Static 背景色的用例**：Ink 的测试经 `render()` 的 debug 模式取输出，只有 Static 时末尾带 `\n`。`render_to_string` 按 Ink `renderToString` 的规则去掉这个换行，移植版的期望值随之去掉末尾空行。
+- **`overflow.tsx` 的越界写入用例**：`columns: 10` 时，Ink 把右边框写到行宽之外，JS 稀疏数组留下的空洞在拼接时被跳过，内部行宽 11 格。移植版按网格补空格，内部行与边框行同宽，都是 12 格。
+- **`c1-rendering.tsx` 宽度 4 的超链接用例**：wrap-ansi 折行时用 BEL 结尾重开超链接，叠在原链接内，第二行出现两次打开、两次关闭。移植版每段只打开、关闭一次，保留原终结符。
 
 ## Ink 期望中反直觉的行为
 
 测试以 Ink 的行为为准：
 
 - 输入中的原始 SGR（含 RGB、256 色）保留原序列，不随 `color_level` 降级。
-- `overflow.tsx`：`columns: 10` 时，越界用例的边框行宽 12 格，内部行宽 11 格。
 - `truncate-width.tsx`：中间截断遇到宽字符，结果是 `你…`，与末尾截断相同。
 - ANSI 分词：单独出现的 `ESC \` 记为 `Esc`，不记为 ST。
 - `wrapText("hello world", 5)` 的结果中有一行是单个空格。

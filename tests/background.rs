@@ -13,7 +13,7 @@ fn static_background_color_is_inherited_by_its_text() {
             .background_color(Color::Blue),
         100,
     );
-    assert_ansi_eq(&output, &styled(&["{bg=blue}A  {/}", ""]));
+    assert_ansi_eq(&output, &styled(&["{bg=blue}A  {/}"]));
 }
 
 #[test]

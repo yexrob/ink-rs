@@ -110,19 +110,19 @@ fn text_with_dimmed_color() {
 
 #[test]
 fn text_with_hex_color() {
-    let output = render(Text::new("Test").color(Color::Rgb(255, 136, 0)));
+    let output = render_truecolor(Text::new("Test").color(Color::Rgb(255, 136, 0)), 100);
     assert_ansi_eq(&output, &styled(&["{fg=#ff8800}Test{/}"]));
 }
 
 #[test]
 fn text_with_rgb_color() {
-    let output = render(Text::new("Test").color(Color::Rgb(255, 136, 0)));
+    let output = render_truecolor(Text::new("Test").color(Color::Rgb(255, 136, 0)), 100);
     assert_ansi_eq(&output, &styled(&["{fg=#ff8800}Test{/}"]));
 }
 
 #[test]
 fn text_with_ansi256_color() {
-    let output = render(Text::new("Test").color(Color::Ansi256(194)));
+    let output = render_truecolor(Text::new("Test").color(Color::Ansi256(194)), 100);
     assert_ansi_eq(&output, &styled(&["{fg=194}Test{/}"]));
 }
 
@@ -134,19 +134,25 @@ fn text_with_standard_background_color() {
 
 #[test]
 fn text_with_hex_background_color() {
-    let output = render(Text::new("Test").background_color(Color::Rgb(255, 136, 0)));
+    let output = render_truecolor(
+        Text::new("Test").background_color(Color::Rgb(255, 136, 0)),
+        100,
+    );
     assert_ansi_eq(&output, &styled(&["{bg=#ff8800}Test{/}"]));
 }
 
 #[test]
 fn text_with_rgb_background_color() {
-    let output = render(Text::new("Test").background_color(Color::Rgb(255, 136, 0)));
+    let output = render_truecolor(
+        Text::new("Test").background_color(Color::Rgb(255, 136, 0)),
+        100,
+    );
     assert_ansi_eq(&output, &styled(&["{bg=#ff8800}Test{/}"]));
 }
 
 #[test]
 fn text_with_ansi256_background_color() {
-    let output = render(Text::new("Test").background_color(Color::Ansi256(194)));
+    let output = render_truecolor(Text::new("Test").background_color(Color::Ansi256(194)), 100);
     assert_ansi_eq(&output, &styled(&["{bg=194}Test{/}"]));
 }
 

@@ -51,7 +51,7 @@ fn c1_hyperlink_preserves_layout_and_styling_at_width_4() {
         lines(&[
             "┌──┐",
             "│\u{1b}]8;;https://example.com\u{1b}\\li\u{1b}]8;;\u{1b}\\│",
-            "│\u{1b}]8;;https://example.com\u{1b}\\\u{1b}]8;;https://example.com\u{7}nk\u{1b}]8;;\u{7}\u{1b}]8;;\u{1b}\\│",
+            "│\u{1b}]8;;https://example.com\u{1b}\\nk\u{1b}]8;;\u{1b}\\│",
             "└──┘",
         ])
     );
