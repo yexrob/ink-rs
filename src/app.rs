@@ -270,6 +270,9 @@ impl AppOutput {
             final_output.extend_from_slice(b"\x1b[?1049l\x1b[?25h");
         } else {
             if self.interactive {
+                if let Some(frame) = &self.last_frame {
+                    self.output.uncap(frame, self.columns, &mut final_output);
+                }
                 self.output.done(&mut final_output);
             }
             if self.interactive && self.tty {

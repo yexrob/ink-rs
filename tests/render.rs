@@ -226,6 +226,33 @@ fn issue_935_overflowing_rerenders_must_not_erase_terminal_scrollback() {
 }
 
 #[test]
+fn unmount_writes_a_frame_taller_than_the_viewport_in_full() {
+    let terminal = TestTerminal::new(100, 5);
+    terminal.write("$ app\r\n");
+    let app = mount(
+        column((0..8).map(|n| format!("line {n}"))),
+        Options::default(),
+        &terminal,
+    );
+    app.unmount();
+
+    let mut screen = Screen::new(&terminal, 100, 5);
+    let mut history = screen.lines();
+    while history.last().is_some_and(String::is_empty) {
+        history.pop();
+    }
+    assert_eq!(
+        history,
+        [
+            "$ app", "line 0", "line 1", "line 2", "line 3", "line 4", "line 5", "line 6",
+            "line 7",
+        ]
+    );
+    assert_eq!(screen.cursor(), (4, 0));
+    assert!(screen.cursor_visible());
+}
+
+#[test]
 fn issue_450_full_height_rerenders_should_not_clear_before_unmount() {
     let terminal = TestTerminal::new(100, 6);
     let _app = run_fixture(&terminal, 1);

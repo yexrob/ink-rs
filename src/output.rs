@@ -40,7 +40,7 @@ impl Output {
     ) {
         assert!(columns > 0 && rows > 0, "viewport must be positive");
         // Unlike Ink's overflow redraw (src/ink.tsx:764-786), keep only rows
-        // reachable by relative moves. Cut rows must never enter scrollback.
+        // reachable by relative moves. Cut rows enter scrollback at unmount.
         let cut = frame.live.len().saturating_sub(rows);
         let mut live: Vec<_> = frame.live[cut..]
             .iter()
@@ -200,6 +200,16 @@ impl Output {
             erase_down(output);
             self.forget();
         }
+    }
+
+    /// Unmount: rewrites a frame whose top the height cap cut, so the cut rows
+    /// enter scrollback once. A cleared output stays clean.
+    pub(crate) fn uncap(&mut self, frame: &Frame, columns: usize, output: &mut Vec<u8>) {
+        if self.live.is_empty() || frame.live.len() <= self.live.len() {
+            return;
+        }
+        self.clear(output);
+        self.render(frame, None, columns, usize::MAX, output);
     }
 
     pub(crate) fn done(&mut self, output: &mut Vec<u8>) {
