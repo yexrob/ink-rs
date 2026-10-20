@@ -1,9 +1,11 @@
 // Ink test/components.tsx and test/fixtures/ci.tsx, commit 26d2c3f.
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use super::{Stop, environment, run_loop};
+use super::{Message, Stop, environment, run_loop};
 use crate::app::{App, resolve_interactive};
 use crate::testing::TestTerminal;
 use crate::{ColorLevel, Element, Options, Scope, Static, Text, component};
@@ -70,7 +72,7 @@ fn render_all_frames_if_ci_environment_variable_equals_false() {
     }
 }
 
-// Native coverage for the loop's exit check; PTY exit tests arrive in M3.
+// Native coverage for the loop's exit check while a caller retains a handle.
 #[test]
 fn run_loop_exits_while_an_outside_handle_is_retained() {
     let terminal = TestTerminal::new(100, 24);
@@ -96,4 +98,74 @@ fn run_loop_exits_while_an_outside_handle_is_retained() {
     assert_eq!(*value.downcast::<&str>().unwrap(), "finished");
     worker.join().unwrap();
     drop(handle);
+}
+
+// Native rule: EOF removes stdin liveness without discarding queued updates;
+// PTY E13 covers the live-input branch.
+#[test]
+fn input_eof_allows_natural_end_after_updates() {
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = App::new(
+        component(
+            |cx: &mut Scope, _: &()| {
+                cx.use_input(true, |_, _| {});
+                Text::new("waiting").into()
+            },
+            (),
+        ),
+        Options::default(),
+        Box::new(terminal),
+        true,
+        ColorLevel::None,
+        Instant::now(),
+    );
+    let (sender, receiver) = mpsc::channel();
+    app.queue().set_wake(Arc::new(sender.clone()));
+    app.render_if_due(Instant::now());
+    let handle = app.queue().handle();
+    let updated = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = updated.clone();
+    handle.update(move || flag.store(true, std::sync::atomic::Ordering::SeqCst));
+    drop(handle);
+    sender.send(Message::InputEnded).unwrap();
+    assert!(matches!(run_loop(&mut app, &receiver), Stop::Idle));
+    assert!(updated.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(app.raw_mode());
+}
+
+// Native rule: concatenate adjacent reads, but preserve message barriers.
+#[test]
+fn adjacent_input_is_batched_without_crossing_other_messages() {
+    let received = Rc::new(RefCell::new(Vec::new()));
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = App::new(
+        component(
+            |cx: &mut Scope, received: &Rc<RefCell<Vec<String>>>| {
+                let received = received.clone();
+                cx.use_input(true, move |input, _| {
+                    received.borrow_mut().push(input.to_owned());
+                });
+                Text::new("waiting").into()
+            },
+            received.clone(),
+        ),
+        Options::default(),
+        Box::new(terminal),
+        true,
+        ColorLevel::None,
+        Instant::now(),
+    );
+    let (sender, receiver) = mpsc::channel();
+    app.render_if_due(Instant::now());
+    for message in [
+        Message::Input(b"a".to_vec()),
+        Message::Input(b"b".to_vec()),
+        Message::Resize,
+        Message::Input(b"c".to_vec()),
+        Message::InputEnded,
+    ] {
+        sender.send(message).unwrap();
+    }
+    assert!(matches!(run_loop(&mut app, &receiver), Stop::Idle));
+    assert_eq!(*received.borrow(), ["ab", "c"]);
 }

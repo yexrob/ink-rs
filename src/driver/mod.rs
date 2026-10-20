@@ -11,6 +11,7 @@ use process::{ProcessTerminal, Registration};
 
 mod environment;
 mod process;
+mod stdin;
 
 #[cfg(test)]
 mod tests;
@@ -19,6 +20,9 @@ pub(super) enum Message {
     Wake,
     Resize,
     Signal,
+    Input(Vec<u8>),
+    InputStarted,
+    InputEnded,
 }
 
 impl Wake for mpsc::Sender<Message> {
@@ -31,7 +35,8 @@ impl Wake for mpsc::Sender<Message> {
 /// Non-interactive apps defer their live frame until unmount, as Ink does.
 /// Call [`Instance::wait_until_exit`] to drive subsequent updates.
 pub fn render(element: impl Into<Element>, options: Options) -> Instance {
-    let terminal = ProcessTerminal::new();
+    let (sender, receiver) = mpsc::channel();
+    let terminal = ProcessTerminal::new(sender.clone());
     let env = |key: &str| std::env::var_os(key).map(|value| value.to_string_lossy().into_owned());
     let interactive = resolve_interactive(
         options.interactive,
@@ -41,7 +46,6 @@ pub fn render(element: impl Into<Element>, options: Options) -> Instance {
     let color = options
         .color_level
         .unwrap_or_else(|| environment::color_level(terminal.is_tty(), env));
-    let (sender, receiver) = mpsc::channel();
     let registration = terminal.register(sender.clone());
     let mut app = App::new(
         element.into(),
@@ -136,22 +140,39 @@ enum Stop {
     Signal,
 }
 
-fn natural_end(next: Option<Instant>, queue: &UpdateQueue) -> bool {
-    // Ink waitUntilExit uses Node's beforeExit. M3 input and M4 timers extend
-    // this one liveness condition rather than adding polls to the loop.
-    next.is_none() && queue.is_idle()
+fn natural_end(next: Option<Instant>, queue: &UpdateQueue, input_alive: bool) -> bool {
+    // Ink waitUntilExit uses Node's beforeExit; raw mode is stdin.ref().
+    next.is_none() && queue.is_idle() && !input_alive
 }
 
 fn run_loop(app: &mut App, receiver: &mpsc::Receiver<Message>) -> Stop {
     let queue = app.queue();
     let mut message = None;
+    let mut input_ended = false;
     loop {
+        let mut input = Vec::new();
         for event in message.take().into_iter().chain(receiver.try_iter()) {
+            if let Message::Input(bytes) = event {
+                input.extend(bytes);
+                continue;
+            }
+            // Ink handleReadable drains stdin.read(). Keep non-input messages
+            // as barriers so resize and termination retain their queue order.
+            if !input.is_empty() {
+                app.input(&input, Instant::now());
+                input.clear();
+            }
             match event {
                 Message::Wake => {}
                 Message::Resize => app.resize(app.terminal_size()),
                 Message::Signal => return Stop::Signal,
+                Message::InputStarted => input_ended = false,
+                Message::InputEnded => input_ended = true,
+                Message::Input(_) => unreachable!(),
             }
+        }
+        if !input.is_empty() {
+            app.input(&input, Instant::now());
         }
         if let Some(error) = app.take_error() {
             return Stop::Error(error);
@@ -163,7 +184,13 @@ fn run_loop(app: &mut App, receiver: &mpsc::Receiver<Message>) -> Stop {
         if app.exit_result().is_some() {
             return Stop::Exit;
         }
-        if natural_end(next, &queue) {
+        if natural_end(next, &queue, app.raw_mode() && !input_ended) {
+            // An acquire during this step can restart stdin after EOF. Observe
+            // its Started notification before deciding that input is dead.
+            if let Ok(event) = receiver.try_recv() {
+                message = Some(event);
+                continue;
+            }
             return Stop::Idle;
         }
         // mpsc retains notifications sent between the liveness check and recv.

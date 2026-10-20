@@ -284,6 +284,10 @@ pub(crate) struct App {
 }
 
 impl App {
+    pub(crate) fn raw_mode(&self) -> bool {
+        self.raw_mode
+    }
+
     pub(crate) fn queue(&self) -> Arc<UpdateQueue> {
         self.queue.clone()
     }
