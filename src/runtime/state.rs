@@ -130,6 +130,7 @@ struct StateValue {
 }
 
 pub(super) struct Store {
+    pub(super) input: RefCell<super::input::InputState>,
     pub(crate) queue: Arc<UpdateQueue>,
     pub(super) window_size: Cell<WindowSize>,
     pub(super) id: u64,
@@ -160,6 +161,7 @@ impl Drop for StateSlot {
 impl Store {
     pub(super) fn new() -> Rc<Self> {
         let store = Rc::new(Self {
+            input: RefCell::default(),
             queue: Arc::default(),
             window_size: Cell::new(WindowSize {
                 columns: 80,

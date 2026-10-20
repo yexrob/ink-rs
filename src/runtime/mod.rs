@@ -20,6 +20,7 @@ use state::{RenderGuard, Store};
 
 mod app_handle;
 mod hooks;
+mod input;
 mod output;
 mod state;
 
@@ -365,6 +366,7 @@ pub(crate) struct Runtime {
     previous_static: Option<Rc<Dirty>>,
     static_changed: bool,
     layout_pending: bool,
+    pub(crate) exit_on_ctrl_c: bool,
 }
 
 impl Runtime {
@@ -404,6 +406,7 @@ impl Runtime {
             previous_static: None,
             static_changed: false,
             layout_pending: false,
+            exit_on_ctrl_c: true,
         }
     }
 

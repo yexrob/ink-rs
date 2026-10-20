@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::io;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -12,6 +13,9 @@ use crate::{ColorLevel, CursorPosition, Element, OutputStream, RenderOptions, Wi
 /// Options for a live app, including [`crate::testing::mount`].
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
+    /// Exit with `Ok(None)` on a Ctrl+C press or repeat (default true).
+    /// Those events do not reach `use_input`; a release does.
+    pub exit_on_ctrl_c: bool,
     /// Paint rate limit, default 30. The window is ceil(1000 / max_fps)
     /// milliseconds; zero uses a zero-millisecond window, matching Ink.
     pub max_fps: u32,
@@ -26,6 +30,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            exit_on_ctrl_c: true,
             max_fps: 30,
             interactive: None,
             alternate_screen: false,
@@ -226,6 +231,7 @@ impl WriteDestination for RefCell<AppOutput> {
 }
 
 pub(crate) struct App {
+    raw_mode: bool,
     runtime: Option<Runtime>,
     queue: Arc<UpdateQueue>,
     exit_result: Option<ExitResult>,
@@ -281,6 +287,7 @@ impl App {
             },
         );
         runtime.resize(size);
+        runtime.exit_on_ctrl_c = options.exit_on_ctrl_c;
         let destination = Rc::new(RefCell::new(AppOutput {
             output: Output::new(),
             terminal,
@@ -295,6 +302,7 @@ impl App {
         }));
         runtime.set_destination(destination.clone());
         Self {
+            raw_mode: false,
             queue: runtime.queue(),
             runtime: Some(runtime),
             exit_result: None,
@@ -336,6 +344,7 @@ impl App {
 
     pub(crate) fn render_if_due(&mut self, now: Instant) -> Option<Instant> {
         let runtime = self.runtime.as_mut()?;
+        runtime.flush_input(now);
         runtime.queue().drain();
         let commit = runtime.has_work().then(|| runtime.commit());
         if commit.is_some() {
@@ -363,16 +372,39 @@ impl App {
             runtime.after_write();
             self.pending |= cursor != runtime.cursor();
         }
+        let raw_mode = runtime.input_holders() > 0;
+        if raw_mode != self.raw_mode {
+            let mut destination = self.destination.borrow_mut();
+            if raw_mode && !destination.terminal.stdin_is_tty() {
+                self.queue.request_exit(Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "raw mode is not supported on stdin",
+                )
+                .into()));
+            } else {
+                // Ink defers disable to a microtask; the end of a step gives
+                // same-commit holder swaps the same terminal-mode lifetime.
+                destination.terminal.set_raw_mode(raw_mode);
+                self.raw_mode = raw_mode;
+            }
+        }
         if self.queue.has_exit() {
             self.unmount();
             return None;
         }
-        if runtime.has_work() || runtime.queue().has_pending() {
+        let wake = if runtime.has_work() || runtime.queue().has_pending() {
             Some(now)
         } else if self.pending && self.interactive {
             Some(self.deadline.unwrap_or(now))
         } else {
             None
+        };
+        wake.into_iter().chain(runtime.input_deadline()).min()
+    }
+
+    pub(crate) fn input(&mut self, bytes: &[u8], now: Instant) {
+        if let Some(runtime) = &mut self.runtime {
+            runtime.input(bytes, now);
         }
     }
 
@@ -394,6 +426,10 @@ impl App {
     pub(crate) fn unmount(&mut self) {
         if self.runtime.is_none() {
             return;
+        }
+        if self.raw_mode {
+            self.destination.borrow_mut().terminal.set_raw_mode(false);
+            self.raw_mode = false;
         }
         if std::thread::panicking() {
             // Cleanup runs user code: a second panic aborts the process, so

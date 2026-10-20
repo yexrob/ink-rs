@@ -116,6 +116,14 @@ impl ProcessTerminal {
 }
 
 impl Terminal for ProcessTerminal {
+    fn stdin_is_tty(&self) -> bool {
+        io::stdin().is_terminal()
+    }
+
+    fn set_raw_mode(&mut self, _enabled: bool) {
+        // The production input driver adds termios and the reader.
+    }
+
     fn write(&mut self, bytes: &[u8], restore: &[u8]) {
         let mut state = self.state.lock().unwrap();
         state.write(bytes, false);

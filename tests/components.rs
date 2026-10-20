@@ -2,9 +2,12 @@
 
 mod common;
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::time::Duration;
 
 use common::{render, *};
+use ink_rs::testing::{TestTerminal, mount};
 use ink_rs::*;
 
 // The OSC cases assert stripAnsi(output), not the escape sequence encoding.
@@ -580,6 +583,105 @@ fn replace_child_node_with_text() {
 
 thread_local! {
     static LIVE_COUNT: std::cell::Cell<Option<State<u32>>> = const { std::cell::Cell::new(None) };
+}
+
+// Ink spies on ref/unref and listenerCount too; those Node stream operations
+// have no counterpart. Active use_input replaces useStdin().setRawMode.
+fn raw_input(cx: &mut Scope, _: &()) -> Element {
+    cx.use_input(true, |_, _| {});
+    Text::new("Test").into()
+}
+
+#[test]
+fn disable_raw_mode_when_all_input_components_are_unmounted() {
+    fn inputs(_: &mut Scope, count: &usize) -> Element {
+        Element::fragment((0..*count).map(|_| component(raw_input, ())))
+    }
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(component(inputs, 2), Options::default(), &terminal);
+    assert_eq!(terminal.raw_mode_calls(), [true]);
+    app.rerender(component(inputs, 1));
+    assert_eq!(terminal.raw_mode_calls(), [true]);
+    app.rerender(component(inputs, 0));
+    // The end of the step replaces Ink's queued microtask.
+    assert_eq!(terminal.raw_mode_calls(), [true, false]);
+}
+
+#[test]
+fn do_not_disable_raw_mode_when_swapping_components_that_use_use_input() {
+    fn step_b(cx: &mut Scope, _: &()) -> Element {
+        cx.use_input(true, |_, _| {});
+        Text::new("B").into()
+    }
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(component(raw_input, ()), Options::default(), &terminal);
+    assert_eq!(terminal.raw_mode_calls(), [true]);
+    app.rerender(component(step_b, ()));
+    assert_eq!(terminal.raw_mode_calls(), [true]);
+}
+
+#[test]
+fn clear_pending_input_parser_state_when_swapping_components_that_use_use_input() {
+    let received = Rc::new(RefCell::new(Vec::new()));
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(component(raw_input, ()), Options::default(), &terminal);
+    app.input("\x1b[");
+    app.rerender(component(
+        |cx: &mut Scope, received: &Rc<RefCell<Vec<String>>>| {
+            let received = received.clone();
+            cx.use_input(true, move |input, _| {
+                received.borrow_mut().push(input.to_owned())
+            });
+            Text::new("B").into()
+        },
+        received.clone(),
+    ));
+    app.advance(Duration::from_millis(20));
+    assert!(received.borrow().is_empty());
+}
+
+#[test]
+fn re_ref_stdin_when_input_is_used_after_previous_unmount() {
+    let first = Rc::new(RefCell::new(Vec::new()));
+    let second = Rc::new(RefCell::new(Vec::new()));
+    let example = |received: Rc<RefCell<Vec<String>>>| {
+        component(
+            |cx: &mut Scope, received: &Rc<RefCell<Vec<String>>>| {
+                let received = received.clone();
+                cx.use_input(true, move |input, _| {
+                    received.borrow_mut().push(input.to_owned())
+                });
+                component(raw_input, ())
+            },
+            received,
+        )
+    };
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(example(first.clone()), Options::default(), &terminal);
+    assert_eq!(terminal.raw_mode_calls(), [true]);
+    app.input("a");
+    assert_eq!(*first.borrow(), ["a"]);
+    app.unmount();
+    assert_eq!(terminal.raw_mode_calls(), [true, false]);
+    let mut app = mount(example(second.clone()), Options::default(), &terminal);
+    assert_eq!(terminal.raw_mode_calls(), [true, false, true]);
+    app.input("b");
+    assert_eq!(*second.borrow(), ["b"]);
+    assert_eq!(*first.borrow(), ["a"]);
+    app.unmount();
+    assert_eq!(terminal.raw_mode_calls(), [true, false, true, false]);
+}
+
+#[test]
+fn set_raw_mode_should_throw_if_raw_mode_is_not_supported() {
+    let terminal = TestTerminal::new(100, 24).with_stdin_tty(false);
+    let app = mount(component(raw_input, ()), Options::default(), &terminal);
+    // Ink's caught mount/unmount throws become one failed app exit, with no
+    // terminal switch: there is no public imperative setRawMode API.
+    assert!(
+        matches!(app.exit_result(), Some(Err(Error::Io(error))) if error.kind() == std::io::ErrorKind::Unsupported)
+    );
+    assert!(terminal.raw_mode_calls().is_empty());
 }
 
 fn live_counter(cx: &mut Scope, _: &()) -> Element {

@@ -37,6 +37,37 @@ fn assert_cursor(terminal: &TestTerminal, rows: u16, y: u16, x: u16) {
     assert!(screen.cursor_visible());
 }
 
+fn input_app(cx: &mut Scope, multiline: &bool) -> Element {
+    let text = cx.use_state(String::new);
+    cx.use_input(true, move |input, key| {
+        if key.backspace || key.delete {
+            text.update(|text| {
+                text.pop();
+            });
+        } else if !input.is_empty() && !key.ctrl && !key.meta {
+            text.update(|text| text.push_str(input));
+        }
+    });
+    let value = text.get();
+    cx.use_cursor(Some(CursorPosition {
+        x: 2 + value.len(),
+        y: usize::from(*multiline),
+    }));
+    let mut view = View::new().flex_direction(FlexDirection::Column);
+    if *multiline {
+        view = view.child(Text::new("Header"));
+    }
+    view.child(Text::new(format!("> {value}"))).into()
+}
+
+#[test]
+fn cursor_is_shown_at_specified_position_after_render() {
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(component(input_app, false), Options::default(), &terminal);
+    app.advance(Duration::from_millis(50));
+    assert_cursor(&terminal, 24, 0, 2);
+}
+
 #[test]
 fn memoized_cursor_survives_sibling_updates_incremental_false() {
     CURSOR_RENDERS.set(0);
@@ -64,6 +95,84 @@ fn memoized_cursor_survives_sibling_updates_incremental_false() {
     assert!(!Screen::new(&terminal, 100, 24).cursor_visible());
     assert!(output.contains("\x1b[?25l"));
     assert!(!output.contains("\x1b[?25h"));
+}
+
+#[test]
+fn cursor_is_not_hidden_by_use_effect_after_first_render() {
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(component(input_app, false), Options::default(), &terminal);
+    app.advance(Duration::from_millis(50));
+    assert!(Screen::new(&terminal, 100, 24).cursor_visible());
+}
+
+#[test]
+fn cursor_follows_text_input() {
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(component(input_app, false), Options::default(), &terminal);
+    app.advance(Duration::from_millis(50));
+    app.input("a");
+    app.advance(Duration::from_millis(50));
+    assert_cursor(&terminal, 24, 0, 3);
+}
+
+#[test]
+fn cursor_moves_on_space_input_even_when_output_is_identical() {
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(component(input_app, false), Options::default(), &terminal);
+    flush(&mut app);
+    app.input("a");
+    flush(&mut app);
+    let after_a = terminal.writes().len();
+    app.input(" ");
+    flush(&mut app);
+    assert!(terminal.writes().len() > after_a);
+    assert_cursor(&terminal, 24, 0, 4);
+}
+
+#[test]
+fn cursor_is_cleared_when_component_using_use_cursor_unmounts() {
+    fn child(cx: &mut Scope, _: &()) -> Element {
+        cx.use_cursor(Some(CursorPosition { x: 5, y: 0 }));
+        Text::new("child").into()
+    }
+    fn parent(cx: &mut Scope, _: &()) -> Element {
+        let show = cx.use_state(|| true);
+        cx.use_input(true, move |_, key| {
+            if key.enter {
+                show.set(false);
+            }
+        });
+        View::new()
+            .child(if show.get() {
+                component(child, ())
+            } else {
+                Text::new("no cursor").into()
+            })
+            .into()
+    }
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(component(parent, ()), Options::default(), &terminal);
+    app.advance(Duration::from_millis(50));
+    assert!(Screen::new(&terminal, 100, 24).cursor_visible());
+    app.input("\r");
+    app.advance(Duration::from_millis(50));
+    assert!(!Screen::new(&terminal, 100, 24).cursor_visible());
+}
+
+#[test]
+fn screen_does_not_scroll_up_on_subsequent_renders() {
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(component(input_app, true), Options::default(), &terminal);
+    app.advance(Duration::from_millis(50));
+    let before = terminal.writes().len();
+    app.input("x");
+    app.advance(Duration::from_millis(50));
+    // A final screen cannot show that the cursor was hidden during erasure.
+    assert!(terminal.writes()[before..].join("").contains("\x1b[?25l"));
+    let mut screen = Screen::new(&terminal, 100, 24);
+    assert_eq!(&screen.rows()[..2], ["Header", "> x"]);
+    assert!(screen.scrollback().is_empty());
+    assert_cursor(&terminal, 24, 1, 3);
 }
 
 fn write_with_cursor(cx: &mut Scope, stream: &OutputStream) -> Element {

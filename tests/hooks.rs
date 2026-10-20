@@ -6,6 +6,62 @@ use common::Screen;
 use ink_rs::testing::{TestTerminal, mount};
 use ink_rs::*;
 
+#[test]
+fn use_input_ignore_input_if_not_active() {
+    thread_local! { static HANDLE: std::cell::RefCell<Option<AppHandle>> = const { std::cell::RefCell::new(None) }; }
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(
+        component(
+            |cx: &mut Scope, _: &()| {
+                HANDLE.with(|handle| *handle.borrow_mut() = Some(cx.use_app()));
+                let text = cx.use_state(String::new);
+                cx.use_input(true, move |input, _| {
+                    text.update(|text| text.push_str(input))
+                });
+                cx.use_input(false, move |input, _| {
+                    text.update(|text| text.push_str(input))
+                });
+                Text::new(text.get()).into()
+            },
+            (),
+        ),
+        Options::default(),
+        &terminal,
+    );
+    app.input("x");
+    // No timers yet: the retained handle replaces the fixture's 100 ms exit.
+    HANDLE.with(|handle| handle.borrow_mut().take().unwrap().exit());
+    app.advance(std::time::Duration::ZERO);
+    assert!(matches!(app.exit_result(), Some(Ok(None))));
+    assert_eq!(Screen::new(&terminal, 100, 24).rows()[0], "x");
+}
+
+#[test]
+fn use_input_handle_ctrl_c_via_kitty_protocol_when_exit_on_ctrl_c_is_false() {
+    fn input(cx: &mut Scope, _: &()) -> Element {
+        let exit = cx.use_app();
+        cx.use_input(true, move |input, key| {
+            if input == "c" && key.ctrl {
+                exit.exit();
+            } else {
+                panic!("Crash");
+            }
+        });
+        Element::fragment(Vec::<Element>::new())
+    }
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(
+        component(input, ()),
+        Options {
+            exit_on_ctrl_c: false,
+            ..Options::default()
+        },
+        &terminal,
+    );
+    app.input("\x1b[99;5u");
+    assert!(matches!(app.exit_result(), Some(Ok(None))));
+}
+
 fn write(cx: &mut Scope, stream: &OutputStream) -> Element {
     let writer = match stream {
         OutputStream::Stdout => cx.use_stdout(),

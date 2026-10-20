@@ -1,5 +1,5 @@
 //! Pure stdin decoding, input tokenization and key mapping. The driver owns I/O
-//! and App owns escape-flush deadlines.
+//! and Runtime owns dispatch and escape-flush deadlines.
 
 pub(crate) mod keypress;
 pub(crate) mod parser;

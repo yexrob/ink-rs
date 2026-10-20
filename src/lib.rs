@@ -11,7 +11,8 @@
 //! [`testing::render`] keeps a tree mounted, records presented frames and
 //! exposes rerender and settle operations without terminal I/O.
 //! [`testing::mount`] drives a live app with [`Options`], an in-memory terminal,
-//! and a clock advanced by the test.
+//! and a clock advanced by the test. [`testing::TestApp::input`] feeds bytes to
+//! active [`Scope::use_input`] hooks.
 //!
 //! See `docs/design.md` for the architecture and the milestone plan.
 
@@ -24,10 +25,6 @@ mod driver;
 mod element;
 mod error;
 mod host;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "M3 phase 3 wires input into App and input hooks")
-)]
 mod input;
 mod layout;
 mod output;
@@ -48,6 +45,7 @@ pub use components::{Newline, Spacer, Static, Text, Transform, View};
 pub use driver::{Instance, render};
 pub use element::{Element, Key, TextChild};
 pub use error::Error;
+pub use input::{KeyEvent, KeyEventType};
 pub use render::{RenderOptions, render_to_string};
 pub use runtime::{
     AppHandle, CursorPosition, ElementMetrics, NodeRef, OutputStream, OutputWriter, Scope, State,

@@ -95,8 +95,8 @@ testing 驱动在 M1，同步驱动在 M2，tokio 驱动在 M4。CI 跑一遍 `-
 fn counter(cx: &mut Scope, p: &CounterProps) -> Element {
     let count = cx.use_state(|| 0);
     let step = p.step;
-    cx.use_input(move |_, key| {
-        if key.up { count.update(|c| *c += step) }
+    cx.use_input(true, move |_, key| {
+        if key.up_arrow { count.update(|c| *c += step) }
     });
     View::new()
         .padding(1)
@@ -150,7 +150,7 @@ M0 的 API（`src/lib.rs`）：
 
 - **解析**移植 Ink 的 `input-parser.ts` 与 `parse-keypress.ts`，放在核心的 `input` 模块，没有 I/O。解码同 Node 的 `setEncoding('utf8')`：读取末尾不完整的 UTF-8 序列留到下一次，非法字节换成替换字符。字节切成文本、按键与粘贴事件；末尾单独的 Esc 等 20ms 再交出，截止时间并入 `render_if_due` 返回的唤醒时间。不移植 Ink 接收 `Uint8Array` 的分支：App 设置编码后不会走到它。
 - **按键**：回调收到 `(&str, KeyEvent)`。`KeyEvent` 的字段是 Ink `Key` 的 snake_case，两个 Rust 关键字改名：`return` 叫 `enter`，`super` 叫 `super_key`。kitty 事件的类型为 `Some(KeyEventType::{Press, Repeat, Release})`，传统按键为 `None`。
-- **分发**：`App::input(bytes, now)` 按事件顺序处理 kitty 查询回复、粘贴、Ctrl+C、Esc 与 Tab 的焦点切换，再按注册顺序调用活跃的 `use_input` 回调。一次调用产生的更新合并成一次提交。Tab、Esc、Ctrl+C 在 runtime 处理，`testing::render` 与 `testing::mount` 都能用。`exit_on_ctrl_c`（默认开启）时，按下或重复的 Ctrl+C 退出应用，不交给 `use_input`；松开交给回调。
+- **分发**：`App::input(bytes, now)` 按事件顺序处理 kitty 查询回复、粘贴、Ctrl+C、Esc 与 Tab 的焦点切换，再按注册顺序调用活跃的 `use_input` 回调。一次调用产生的更新合并成一次提交。`Scope::use_input(active, handler)` 在 passive effect 中按 `active` 注册，注册顺序即 effect 顺序；回调取最近一次渲染的闭包。没有持有者时丢弃输入；回调请求退出后，本次读取余下的事件不再分发。Tab、Esc、Ctrl+C 在 runtime 处理，`testing::render` 与 `testing::mount` 都能用。`exit_on_ctrl_c`（默认开启）时，按下或重复的 Ctrl+C 退出应用，不交给 `use_input`；松开交给回调。
 - **raw mode** 由活跃的 `use_input`、`use_paste`、`use_focus` 持有，同 Ink。持有者从 0 变 1 时开启；回到 0 时清空解析状态，模式切换推迟到提交结束，同一次提交中先停用再启用的 hook 不切换模式，对应 Ink 推迟到微任务的关闭。stdin 不是 TTY 时，`use_input` 与 `use_paste` 让应用以 `Error::Io`（`ErrorKind::Unsupported`）退出，对应 Ink `setRawMode` 抛出的错误；`use_focus` 不持有 raw mode，同 Ink 的 `isRawModeSupported` 判断。
 - **粘贴**：有活跃的 `use_paste` 时写 `CSI ?2004h` 开启 bracketed paste，最后一个停用时写 `CSI ?2004l`，stdout 不是 TTY 时不写。粘贴内容交给 `use_paste`，不进入 `use_input`；没有 `use_paste` 时，粘贴内容作为一次输入交给 `use_input`，其中的 `\x03` 不触发退出。
 - **kitty 键盘协议**：选项同 Ink 的 `kittyKeyboard`：`Auto`、`Enabled`、`Disabled` 三种模式，flags 默认 `disambiguateEscapeCodes`。`Enabled` 要求 stdin 与 stdout 都是 TTY，写 `CSI >{flags}u`；`Auto` 还要求交互模式，先写 `CSI ?u` 查询，200ms 内读到回复才推入 flags，截止时间并入唤醒时间。回复只在 raw mode 期间读到，粘贴中的回复按输入处理。卸载时写 `CSI <u`。

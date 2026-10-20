@@ -11,4 +11,8 @@ pub(crate) trait Terminal {
     }
     fn size(&self) -> Option<(u16, u16)>;
     fn is_tty(&self) -> bool;
+    /// Whether stdin supports raw mode.
+    fn stdin_is_tty(&self) -> bool;
+    /// Switches raw mode; failures are retained for take_error, like write.
+    fn set_raw_mode(&mut self, enabled: bool);
 }

@@ -145,13 +145,16 @@ impl TestInstance {
     }
 }
 
-/// In-memory terminal. Clones share an ordered log of stdout and stderr writes.
+/// In-memory terminal. Clones share ordered logs of stdout/stderr writes and
+/// raw-mode switches. Stdin and stdout default to TTYs.
 #[derive(Clone)]
 pub struct TestTerminal {
     writes: Rc<RefCell<Vec<(OutputStream, String)>>>,
     size: Rc<Cell<Option<(u16, u16)>>>,
     resized: Rc<Cell<bool>>,
     tty: bool,
+    stdin_tty: bool,
+    raw_mode_calls: Rc<RefCell<Vec<bool>>>,
 }
 
 impl TestTerminal {
@@ -162,7 +165,20 @@ impl TestTerminal {
             size: Rc::new(Cell::new(Some((columns, rows)))),
             resized: Rc::default(),
             tty: true,
+            stdin_tty: true,
+            raw_mode_calls: Rc::default(),
         }
+    }
+
+    /// Selects whether stdin is a TTY; the default is true.
+    pub fn with_stdin_tty(mut self, tty: bool) -> Self {
+        self.stdin_tty = tty;
+        self
+    }
+
+    /// Returns every raw-mode switch argument in call order, shared by clones.
+    pub fn raw_mode_calls(&self) -> Vec<bool> {
+        self.raw_mode_calls.borrow().clone()
     }
 
     /// Selects whether stdout is a TTY.
@@ -218,6 +234,14 @@ impl TestTerminal {
 }
 
 impl Terminal for TestTerminal {
+    fn stdin_is_tty(&self) -> bool {
+        self.stdin_tty
+    }
+
+    fn set_raw_mode(&mut self, enabled: bool) {
+        self.raw_mode_calls.borrow_mut().push(enabled);
+    }
+
     fn write_stderr(&mut self, bytes: &[u8], _restore: &[u8]) {
         self.writes.borrow_mut().push((
             OutputStream::Stderr,
@@ -273,6 +297,14 @@ pub struct TestApp {
 }
 
 impl TestApp {
+    /// Feeds one stdin read at the current clock time, then runs a step.
+    /// Input reaches active [`crate::Scope::use_input`] hooks. A lone Esc or an
+    /// incomplete sequence waits 20 ms; call [`Self::advance`] to flush it.
+    pub fn input(&mut self, bytes: impl AsRef<[u8]>) {
+        self.app.input(bytes.as_ref(), self.now);
+        self.step();
+    }
+
     /// Returns `None` while running, then the combined exit result.
     /// Exits come from [`crate::AppHandle`] requests, which the next app step
     /// honours after passive effects and terminal restoration.

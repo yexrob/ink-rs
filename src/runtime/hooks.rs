@@ -1,9 +1,12 @@
 use std::any::{Any, TypeId};
+use std::cell::RefCell;
 use std::rc::Rc;
 
+use super::input::{Handler, Registration};
 use super::output::{CursorCleanup, CursorPosition, OutputStream, OutputWriter};
 use super::state::{ElementMetrics, NodeRef, State, StateSlot, Store};
 use super::{AppHandle, Dirty, WindowSize};
+use crate::KeyEvent;
 
 type Setup = Box<dyn FnOnce() -> Box<dyn Any>>;
 
@@ -53,6 +56,25 @@ pub struct Scope<'a> {
 }
 
 impl Scope<'_> {
+    /// Handles input while `active`, enabling raw mode through a passive effect.
+    /// The handler receives text and key identity/modifiers; text runs and paste
+    /// fallback stay one call, while functional keys may carry empty text.
+    /// Calls use the handler from the latest render, in registration order.
+    /// With [`crate::Options::exit_on_ctrl_c`] enabled, Ctrl+C presses and repeats
+    /// exit without reaching the handler; releases reach it.
+    pub fn use_input(&mut self, active: bool, handler: impl FnMut(&str, KeyEvent) + 'static) {
+        let mut handler = Some(Box::new(handler) as Box<dyn FnMut(&str, KeyEvent)>);
+        let current: Handler = self.use_memo((), || Rc::new(RefCell::new(handler.take().unwrap())));
+        // useEffectEvent in Ink keeps the subscription stable across renders.
+        if let Some(handler) = handler {
+            *current.borrow_mut() = handler;
+        }
+        let store = self.store.clone();
+        self.use_effect(active, move || {
+            active.then(|| Registration::new(store, current))
+        });
+    }
+
     /// Returns a thread-safe handle for submitting updates and requesting exit.
     /// The hook does not retain a handle; the returned handle keeps the loop alive.
     /// Exit requests take effect in the next live app step. They have no effect

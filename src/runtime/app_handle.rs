@@ -83,7 +83,7 @@ pub(crate) struct UpdateQueue {
 }
 
 impl UpdateQueue {
-    fn request_exit(&self, request: ExitResult) {
+    pub(crate) fn request_exit(&self, request: ExitResult) {
         let mut state = self.state.lock().unwrap();
         if !state.closed && state.exit.is_none() {
             state.exit = Some(request);
