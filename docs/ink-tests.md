@@ -251,4 +251,4 @@ Ink 有 95 个测试文件、1,646 个测试。
 
 ## 上游跳过的测试
 
-4 个，标 `#[ignore]`，期望值取自 Ink 源码：`width-height.tsx` 中百分比 `minWidth`、`maxWidth` 各一个，Yoga 不支持；`flex-justify-content.tsx` 中 `space-around` 遇到文本节点的两个，Yoga 有缺陷。换成 taffy 后若能通过，去掉 `#[ignore]`。
+4 个，期望值取自 Ink 源码：`width-height.tsx` 中百分比 `minWidth`、`maxWidth` 各一个，Yoga 不支持；`flex-justify-content.tsx` 中 `space-around` 遇到文本节点的两个，Yoga 有缺陷。百分比 `minWidth` 在 taffy 下通过，照常运行；其余 3 个标 `#[ignore]`，能通过时去掉。

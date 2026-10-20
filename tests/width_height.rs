@@ -55,7 +55,6 @@ fn set_min_width() {
 }
 
 #[test]
-#[ignore = "skipped upstream: Yoga does not support percentage min width"]
 fn set_min_width_in_percent() {
     let output = render(
         View::new()
