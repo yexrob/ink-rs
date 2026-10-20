@@ -1,4 +1,4 @@
-use crate::{ColorLevel, Element, host, layout, paint};
+use crate::{ColorLevel, Element, runtime::Runtime};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RenderOptions {
@@ -21,9 +21,14 @@ impl Default for RenderOptions {
 /// trailing whitespace except styled cells, and the result has no trailing
 /// newline.
 ///
+/// Layout effects settle before paint. Passive effects run after the output
+/// is captured, so their state updates do not change the returned string.
+/// Unmount runs effect cleanups, including when rendering unwinds.
+///
 /// [`Static`]: crate::Static
 pub fn render_to_string(element: impl Into<Element>, options: RenderOptions) -> String {
-    let (mut tree, root) = host::build(element.into(), options.columns, options.color_level);
-    layout::compute(&mut tree, root);
-    paint::paint(&tree, root, options.color_level).serialize()
+    let mut runtime = Runtime::new(element.into(), options);
+    let mut output = String::new();
+    runtime.frame(|frame| output = frame.serialize());
+    output
 }

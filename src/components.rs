@@ -1,7 +1,7 @@
 use std::fmt;
 use std::rc::Rc;
 
-use crate::{Color, Element, Position, Style, Styled, TextChild, TextWrap};
+use crate::{Color, Element, Key, Position, Style, Styled, TextChild, TextWrap};
 
 /// A flexbox container, Ink's `<Box>`. Style it with the [`Styled`] methods.
 #[derive(Clone, Debug, Default)]
@@ -11,6 +11,11 @@ pub struct View {
 }
 
 impl View {
+    /// Identifies this element among its siblings.
+    pub fn key(self, key: impl Into<Key>) -> Element {
+        Element::from(self).key(key)
+    }
+
     pub fn new() -> View {
         View::default()
     }
@@ -60,6 +65,11 @@ pub(crate) struct TextStyle {
 }
 
 impl Text {
+    /// Identifies this element among its siblings.
+    pub fn key(self, key: impl Into<Key>) -> Element {
+        Element::from(self).key(key)
+    }
+
     pub fn new(content: impl Into<TextChild>) -> Text {
         Text::default().child(content)
     }
@@ -137,6 +147,11 @@ pub struct Transform {
 }
 
 impl Transform {
+    /// Identifies this element among its siblings.
+    pub fn key(self, key: impl Into<Key>) -> Element {
+        Element::from(self).key(key)
+    }
+
     pub fn new(transform: impl Fn(&str, usize) -> String + 'static) -> Transform {
         Transform {
             transform: Rc::new(transform),
@@ -179,6 +194,11 @@ pub struct Static {
 }
 
 impl Static {
+    /// Identifies this element among its siblings.
+    pub fn key(self, key: impl Into<Key>) -> Element {
+        Element::from(self).key(key)
+    }
+
     pub fn new<T: 'static>(
         items: impl Into<Rc<[T]>>,
         render: impl Fn(&T, usize) -> Element + 'static,

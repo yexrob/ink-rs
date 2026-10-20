@@ -6,11 +6,9 @@ use crate::components::TextStyle;
 use crate::text::styled::{self, CharStyle, StyledLine, StyledText};
 use crate::{ColorLevel, Style, TextWrap};
 
-mod build;
-pub(crate) use build::build;
-
 pub(crate) struct HostTree {
-    nodes: Vec<LayoutNode>,
+    nodes: Vec<Option<LayoutNode>>,
+    free: Vec<usize>,
 }
 
 pub(crate) struct LayoutNode {
@@ -27,15 +25,22 @@ pub(crate) struct LayoutNode {
 
 impl HostTree {
     pub(crate) fn new() -> Self {
-        Self { nodes: Vec::new() }
+        Self {
+            nodes: Vec::new(),
+            free: Vec::new(),
+        }
     }
 
     pub(crate) fn node(&self, node: NodeId) -> &LayoutNode {
-        &self.nodes[usize::from(node)]
+        self.nodes[usize::from(node)]
+            .as_ref()
+            .expect("live host node")
     }
 
     pub(crate) fn node_mut(&mut self, node: NodeId) -> &mut LayoutNode {
-        &mut self.nodes[usize::from(node)]
+        self.nodes[usize::from(node)]
+            .as_mut()
+            .expect("live host node")
     }
 
     pub(crate) fn parent(&self, node: NodeId) -> Option<NodeId> {
@@ -72,6 +77,13 @@ pub(crate) enum LineTransform {
     Function(TransformFn),
 }
 
+impl PartialEq for LineTransform {
+    fn eq(&self, other: &Self) -> bool {
+        // Ink dom.ts setTransform invalidates inline transforms on every update.
+        matches!((self, other), (Self::Style(a), Self::Style(b)) if a == b)
+    }
+}
+
 impl LineTransform {
     pub(crate) fn apply(&self, line: &StyledLine, index: usize) -> StyledText {
         match self {
@@ -94,7 +106,7 @@ impl LineTransform {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(crate) enum Inline {
     Content(StyledText),
     Span {
@@ -103,7 +115,7 @@ pub(crate) enum Inline {
     },
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(crate) struct TextNode {
     pub(crate) children: Vec<Inline>,
     pub(crate) wrap: TextWrap,
@@ -177,8 +189,12 @@ pub(crate) fn create_text(tree: &mut HostTree, text: TextNode) -> NodeId {
 }
 
 fn create(tree: &mut HostTree, props: HostNode) -> NodeId {
-    let node = NodeId::from(tree.nodes.len());
-    tree.nodes.push(LayoutNode {
+    let slot = tree.free.pop().unwrap_or_else(|| {
+        tree.nodes.push(None);
+        tree.nodes.len() - 1
+    });
+    let node = NodeId::from(slot);
+    tree.nodes[slot] = Some(LayoutNode {
         parent: None,
         children: Vec::new(),
         style: taffy::Style::default(),
@@ -206,6 +222,18 @@ pub(crate) fn set_props(tree: &mut HostTree, node: NodeId, props: HostNode) {
 
 pub(crate) fn append_child(tree: &mut HostTree, parent: NodeId, child: NodeId) {
     insert_child(tree, parent, child, None);
+}
+
+/// React's removeChild frees the removed host subtree; moves only detach it.
+pub(crate) fn free_subtree(tree: &mut HostTree, node: NodeId) {
+    if let Some(parent) = tree.parent(node) {
+        remove_child(tree, parent, node);
+    }
+    for child in tree.children(node).to_vec() {
+        free_subtree(tree, child);
+    }
+    tree.nodes[usize::from(node)] = None;
+    tree.free.push(usize::from(node));
 }
 
 /// A detached node stays allocated and may be inserted under another parent.
