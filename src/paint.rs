@@ -33,15 +33,30 @@ pub(crate) struct Frame {
 
 impl Frame {
     pub(crate) fn serialize(&self) -> String {
-        self.static_lines.iter().chain(&self.live).map(|row| {
-            let end = row.iter().rposition(|cell| !matches!(cell, Cell::Glyph(c) if c.grapheme == " " && c.style == CharStyle::default())).map_or(0, |index| index + 1);
-            let line: StyledLine = row[..end].iter().filter_map(|cell| match cell {
-                Cell::Glyph(cell) => Some(cell.clone()),
-                Cell::Continuation(_) => None,
-            }).collect();
-            styled::serialize(&line)
-        }).collect::<Vec<_>>().join("\n")
+        self.static_lines
+            .iter()
+            .chain(&self.live)
+            .map(|row| styled::serialize(&row_to_line(row)))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
+}
+
+fn row_to_line(row: &[Cell]) -> StyledLine {
+    // Ink src/output.ts uses trimEnd(): styled blanks retain their escape codes.
+    let end = row
+        .iter()
+        .rposition(|cell| {
+            !matches!(cell, Cell::Glyph(c) if c.grapheme == " " && c.style == CharStyle::default())
+        })
+        .map_or(0, |index| index + 1);
+    row[..end]
+        .iter()
+        .filter_map(|cell| match cell {
+            Cell::Glyph(cell) => Some(cell.clone()),
+            Cell::Continuation(_) => None,
+        })
+        .collect()
 }
 
 fn blank(style: CharStyle) -> StyledChar {
@@ -194,7 +209,7 @@ fn write(
 }
 
 pub(crate) fn paint(tree: &HostTree, root: NodeId, level: ColorLevel) -> Frame {
-    let layout = crate::layout::get(tree, root);
+    let (layout, _) = crate::layout::get(tree, root, Point::ZERO);
     let mut frame = Frame {
         live: grid(layout.size.width, layout.size.height),
         static_lines: Vec::new(),
@@ -202,14 +217,14 @@ pub(crate) fn paint(tree: &HostTree, root: NodeId, level: ColorLevel) -> Frame {
     walk(
         tree,
         root,
-        Point { x: 0, y: 0 },
+        Offset::default(),
         Clip::default(),
         &mut frame.live,
         level,
         true,
     );
     // renderer.ts selects the first Static in tree order, then checks ancestors.
-    if let Some(node) = find_static(tree, root) {
+    if let Some((node, parent_absolute)) = find_static(tree, root, Point::ZERO) {
         let mut ancestor = Some(node);
         while let Some(id) = ancestor {
             if tree.get_node_context(id).unwrap().style.display == Display::None {
@@ -217,7 +232,7 @@ pub(crate) fn paint(tree: &HostTree, root: NodeId, level: ColorLevel) -> Frame {
             }
             ancestor = tree.parent(id);
         }
-        let layout = crate::layout::get(tree, node);
+        let (layout, _) = crate::layout::get(tree, node, parent_absolute);
         frame.static_lines = grid(
             layout.location.x + layout.size.width + layout.margin.right,
             layout.location.y + layout.size.height + layout.margin.bottom,
@@ -225,7 +240,10 @@ pub(crate) fn paint(tree: &HostTree, root: NodeId, level: ColorLevel) -> Frame {
         walk(
             tree,
             node,
-            Point { x: 0, y: 0 },
+            Offset {
+                layout: parent_absolute,
+                ..Offset::default()
+            },
             Clip::default(),
             &mut frame.static_lines,
             level,
@@ -235,20 +253,36 @@ pub(crate) fn paint(tree: &HostTree, root: NodeId, level: ColorLevel) -> Frame {
     frame
 }
 
-fn find_static(tree: &HostTree, node: NodeId) -> Option<NodeId> {
+fn find_static(
+    tree: &HostTree,
+    node: NodeId,
+    parent_absolute: Point<f32>,
+) -> Option<(NodeId, Point<f32>)> {
     if tree.get_node_context(node).unwrap().is_static {
-        return Some(node);
+        return Some((node, parent_absolute));
     }
+    let location = tree.unrounded_layout(node).location;
+    let absolute = Point {
+        x: parent_absolute.x + location.x,
+        y: parent_absolute.y + location.y,
+    };
     tree.children(node)
         .unwrap()
         .into_iter()
-        .find_map(|child| find_static(tree, child))
+        .find_map(|child| find_static(tree, child, absolute))
+}
+
+#[derive(Clone, Copy, Default)]
+struct Offset {
+    // Ink src/render-node-to-output.ts scrolls paint coordinates, not layout.
+    paint: Point<i32>,
+    layout: Point<f32>,
 }
 
 fn walk(
     tree: &HostTree,
     node: NodeId,
-    offset: Point<i32>,
+    offset: Offset,
     clip: Clip,
     output: &mut [Vec<Cell>],
     level: ColorLevel,
@@ -259,10 +293,10 @@ fn walk(
     if style.display == Display::None || (skip_static && props.is_static) {
         return;
     }
-    let layout = crate::layout::get(tree, node);
+    let (layout, absolute) = crate::layout::get(tree, node, offset.layout);
     let origin = Point {
-        x: offset.x + layout.location.x as i32,
-        y: offset.y + layout.location.y as i32,
+        x: offset.paint.x + layout.location.x as i32,
+        y: offset.paint.y + layout.location.y as i32,
     };
     if let Some(text) = &props.text {
         let mut lines = text.squash();
@@ -297,9 +331,12 @@ fn walk(
             origin.y + layout.size.height as i32 - layout.border.bottom as i32,
         )),
     });
-    let offset = Point {
-        x: origin.x - i32::from(style.content_offset_x),
-        y: origin.y - i32::from(style.content_offset_y),
+    let offset = Offset {
+        paint: Point {
+            x: origin.x - i32::from(style.content_offset_x),
+            y: origin.y - i32::from(style.content_offset_y),
+        },
+        layout: absolute,
     };
     for child in tree.children(node).unwrap() {
         walk(tree, child, offset, clip, output, level, skip_static);

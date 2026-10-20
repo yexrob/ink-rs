@@ -58,16 +58,16 @@ pub(crate) fn compute(tree: &mut HostTree, root: NodeId) {
 
 /// Yoga's text nodes floor their origin and round their extent outwards when
 /// fractional. Taffy's uniform rounding can move centered text by one cell.
-pub(crate) fn get(tree: &HostTree, node: NodeId) -> t::Layout {
+pub(crate) fn get(
+    tree: &HostTree,
+    node: NodeId,
+    parent_absolute: t::Point<f32>,
+) -> (t::Layout, t::Point<f32>) {
     let mut layout = *tree.unrounded_layout(node);
-    let mut absolute = layout.location;
-    let mut ancestor = tree.parent(node);
-    while let Some(parent) = ancestor {
-        let parent_layout = tree.unrounded_layout(parent);
-        absolute.x += parent_layout.location.x;
-        absolute.y += parent_layout.location.y;
-        ancestor = tree.parent(parent);
-    }
+    let absolute = t::Point {
+        x: parent_absolute.x + layout.location.x,
+        y: parent_absolute.y + layout.location.y,
+    };
     let text = tree.get_node_context(node).unwrap().text.is_some();
     fn round(value: f32, floor: bool, ceil: bool) -> f32 {
         let fraction = value - value.floor();
@@ -89,7 +89,7 @@ pub(crate) fn get(tree: &HostTree, node: NodeId) -> t::Layout {
     layout.location.y = round(layout.location.y, text, false);
     layout.size.width = extent(absolute.x, layout.size.width, text);
     layout.size.height = extent(absolute.y, layout.size.height, text);
-    layout
+    (layout, absolute)
 }
 
 fn dimension(value: Dimension) -> t::Dimension {
