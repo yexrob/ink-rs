@@ -447,16 +447,20 @@ impl Screen {
     /// last row, as in tmux. Width growth does not rejoin wrapped rows; alternate screens
     /// do not reflow. Then applies reconstruct-terminal.ts's xterm row shrink:
     /// drop rows below the cursor, then scroll top rows into history.
-    /// Height growth does not pull rows from scrollback.
+    /// Height growth pulls up to the growth's worth of rows from scrollback
+    /// onto the primary screen and moves the cursor down by that count.
+    /// Alternate screens pull nothing back.
     /// vt100 cannot write double-width glyphs at one column or mark a wide
     /// glyph's wrap across an unused last cell; those cases need a real terminal.
     pub fn resize(&mut self, columns: u16, rows: u16) {
         assert!(columns > 0 && rows > 0);
         let old_rows = self.parser.screen().size().0;
         if columns < self.columns && !self.alternate_screen() {
-            // Use the row-shrink viewport after computing reflow coordinates.
+            // Choose the viewport after computing reflow coordinates.
             // set_size would discard the wrap marks rebuilt by the parser.
-            self.reflow(columns, rows.min(old_rows));
+            self.reflow(columns, rows);
+        } else if rows > old_rows && !self.alternate_screen() {
+            self.reflow(self.columns, rows);
         } else if rows < old_rows {
             let scroll = (self.cursor().0 + 1).saturating_sub(rows);
             if scroll > 0 {
@@ -544,7 +548,12 @@ impl Screen {
             }
             height += line.height(columns);
         }
-        let top = anchor.max((mapped_cursor.0 + 1).saturating_sub(usize::from(rows)));
+        if columns == usize::from(self.columns) {
+            mapped_cursor.1 = usize::from(cursor.1);
+        }
+        let top = anchor
+            .max((mapped_cursor.0 + 1).saturating_sub(usize::from(rows.min(old_rows))))
+            .saturating_sub(usize::from(rows.saturating_sub(old_rows)));
         let bottom = top + usize::from(rows);
         let mut parser = vt100::Parser::new(rows, columns as u16, 1000);
         let mut y = 0;

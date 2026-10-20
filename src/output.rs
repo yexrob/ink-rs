@@ -15,6 +15,10 @@ pub(crate) struct Output {
     declared: Option<(usize, usize)>,
     shown: bool,
     full: bool,
+    /// Frame rows pushed into scrollback since drawing from the screen top.
+    /// A nonzero count means the live frame starts at screen row 0.
+    spilled: usize,
+    spilled_width: usize,
 }
 
 impl Output {
@@ -27,6 +31,8 @@ impl Output {
             declared: None,
             shown: true,
             full: false,
+            spilled: 0,
+            spilled_width: 0,
         }
     }
 
@@ -72,6 +78,7 @@ impl Output {
         // src/cursor-helpers.ts:107-118 hides before returning to the bottom.
         self.hide(&mut bytes);
         if !frame.static_lines.is_empty() {
+            self.spilled = 0;
             // Ink src/ink.tsx:802-815 clears live output before new Static rows.
             self.move_to((0, 0), &mut bytes);
             erase_down(&mut bytes);
@@ -140,6 +147,7 @@ impl Output {
     }
 
     pub(crate) fn clear(&mut self, output: &mut Vec<u8>) {
+        self.spilled = 0;
         if self.live.is_empty() {
             return;
         }
@@ -164,17 +172,23 @@ impl Output {
 
     pub(crate) fn resize(
         &mut self,
-        width_decreased: bool,
-        height_decreased: bool,
-        columns: usize,
-        rows: usize,
+        previous: (usize, usize),
+        (columns, rows): (usize, usize),
+        alternate: bool,
         output: &mut Vec<u8>,
     ) {
+        if alternate || columns < self.spilled_width {
+            self.spilled = 0;
+        }
+        if self.live.is_empty() {
+            return;
+        }
+        let width_decreased = columns < previous.0;
+        let height_decreased = rows < previous.1;
+        let growth = rows.saturating_sub(previous.1);
+        let mut up = self.cursor.1;
+        let mut unchanged = true;
         if width_decreased {
-            if self.live.is_empty() {
-                return;
-            }
-            self.hide(output);
             // Unlike Ink src/ink.tsx resized -> log.clear, count reflowed
             // rows so a narrowed terminal does not retain the frame's head.
             let above: usize = self.live[..self.cursor.1]
@@ -185,14 +199,51 @@ impl Output {
                 .live
                 .get(self.cursor.1)
                 .map_or(0, |row| reflow(row, columns, self.cursor.0).1);
-            if above + offset > 0 {
-                output.extend_from_slice(format!("\x1b[{}A", above + offset).as_bytes());
+            up = above + offset;
+            unchanged = self
+                .live
+                .iter()
+                .take(self.cursor.1 + 1)
+                .all(|row| reflow(row, columns, 0).0 == 1);
+        }
+        let pulled = if growth > 0 { self.spilled } else { 0 };
+        if !unchanged {
+            // Rewrapped live rows may now sit above the old spill in history.
+            self.spilled = 0;
+        } else if height_decreased && !alternate {
+            let spilled = (up + 1).saturating_sub(rows);
+            if spilled > 0 {
+                let width = self
+                    .live
+                    .iter()
+                    .take(spilled)
+                    .map(Vec::len)
+                    .max()
+                    .unwrap_or(0);
+                self.spilled_width = if self.spilled == 0 {
+                    width
+                } else {
+                    self.spilled_width.max(width)
+                };
+                self.spilled += spilled;
+            }
+        }
+        if width_decreased || pulled > 0 {
+            // Unlike Ink's resized, erase frame rows pulled back from history
+            // on height growth. CUU stops at the top when growth is partial.
+            self.hide(output);
+            if up + pulled > 0 {
+                output.extend_from_slice(format!("\x1b[{}A", up + pulled).as_bytes());
             }
             erase_down(output);
             self.forget();
+            self.spilled = self.spilled.saturating_sub(growth);
         } else if height_decreased && self.declared.is_some() {
             // Ink src/ink.tsx resized uses the painted cursor, not a pending commit's.
-            self.clear(output);
+            self.hide(output);
+            self.move_to((0, 0), output);
+            erase_down(output);
+            self.forget();
         } else if height_decreased && self.live.len() >= rows {
             // Ink shouldClearTerminalForFrame measures wasFullscreen against
             // the new rows: the terminal has scrolled the frame's top away.
@@ -205,6 +256,7 @@ impl Output {
     /// Unmount: rewrites a frame whose top the height cap cut, so the cut rows
     /// enter scrollback once. A cleared output stays clean.
     pub(crate) fn uncap(&mut self, frame: &Frame, columns: usize, output: &mut Vec<u8>) {
+        self.spilled = 0;
         if self.live.is_empty() || frame.live.len() <= self.live.len() {
             return;
         }
@@ -213,6 +265,7 @@ impl Output {
     }
 
     pub(crate) fn done(&mut self, output: &mut Vec<u8>) {
+        self.spilled = 0;
         self.restore_bytes(output);
         self.shown = true;
         self.forget();

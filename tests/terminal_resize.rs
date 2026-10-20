@@ -332,8 +332,8 @@ fn standard_rendering_leaves_fullscreen_without_clearing_when_the_terminal_heigh
     screen.resize(40, 10);
     app.resize(40, 10);
     screen.update(&terminal);
-    // Ink pins eraseLines(6) + frame + newline. No scrollback-pull model on
-    // growth: assert the frame and its rest cursor, not newly exposed rows.
+    // Ink pins eraseLines(6) + frame + newline. With no history to pull back,
+    // growth keeps the frame at the top and adds its rest row.
     assert_eq!(&screen.rows()[..6], LINES);
     assert_eq!(screen.cursor(), (6, 0));
     assert!(screen.scrollback().is_empty());
@@ -383,4 +383,76 @@ fn width_shrink_maps_declared_cursor_within_its_reflowed_line() {
     );
     assert_eq!(screen.cursor(), (4, 9));
     assert!(screen.cursor_visible());
+}
+
+fn numbered_frame(cx: &mut Scope, cursor: &Option<usize>) -> Element {
+    cx.use_cursor(cursor.map(|y| CursorPosition { x: 0, y }));
+    View::new()
+        .flex_direction(FlexDirection::Column)
+        .children((0..28).map(|i| Text::new(format!("row {i:02}")).key(i)))
+        .into()
+}
+
+fn shrink_then_grow(cursor: Option<usize>) {
+    let (terminal, mut app, mut screen) = shell_frame(component(numbered_frame, cursor), 100, 30);
+    for rows in [20, 50] {
+        screen.resize(100, rows);
+        app.resize(100, rows);
+        screen.update(&terminal);
+    }
+    let expected: Vec<_> = (0..3)
+        .map(|i| format!("shell {i}"))
+        .chain((0..28).map(|i| format!("row {i:02}")))
+        .collect();
+    assert_eq!(trimmed(&mut screen), expected);
+}
+
+#[test]
+fn height_growth_erases_frame_rows_pulled_back_from_scrollback() {
+    shrink_then_grow(None);
+}
+
+#[test]
+fn height_growth_with_a_declared_cursor_erases_frame_rows_without_erasing_shell_history() {
+    shrink_then_grow(Some(24));
+}
+
+#[test]
+fn static_between_shrink_and_growth_keeps_history_above_the_frame() {
+    fn example(_: &mut Scope, printed: &bool) -> Element {
+        Element::fragment::<[Element; 2]>([
+            Static::new(
+                if *printed { vec!["static row"] } else { vec![] },
+                |item, _| Text::new(*item).key(*item),
+            )
+            .into(),
+            component(numbered_frame, None),
+        ])
+    }
+    let (terminal, mut app, mut screen) = shell_frame(component(example, false), 100, 30);
+    screen.resize(100, 20);
+    app.resize(100, 20);
+    screen.update(&terminal);
+    app.rerender(component(example, true));
+    app.advance(Duration::from_millis(34));
+    screen.update(&terminal);
+    let history = screen.scrollback();
+    assert_eq!(history.last().unwrap(), "static row");
+    let writes = terminal.writes().len();
+
+    // Pull back the Static row, not the stale frame rows behind it. An old
+    // spill count would erase Static and the shell history above the frame.
+    screen.resize(100, 21);
+    app.resize(100, 21);
+    screen.update(&terminal);
+    assert_eq!(screen.scrollback(), history);
+    assert_eq!(
+        screen.rows(),
+        (7..28).map(|i| format!("row {i:02}")).collect::<Vec<_>>()
+    );
+    let lines = trimmed(&mut screen);
+    for line in ["shell 0", "shell 1", "shell 2", "static row"] {
+        assert_eq!(lines.iter().filter(|row| *row == line).count(), 1);
+    }
+    assert!(!terminal.writes()[writes..].join("").contains("\x1b[J"));
 }

@@ -159,10 +159,16 @@ impl AppOutput {
         if self.interactive {
             if let Some(previous) = resize {
                 self.output.resize(
-                    self.columns < usize::from(previous.columns),
-                    self.rows < usize::from(previous.rows),
-                    self.columns,
-                    if self.tty { self.rows } else { usize::MAX },
+                    (
+                        usize::from(previous.columns),
+                        if self.tty {
+                            usize::from(previous.rows)
+                        } else {
+                            usize::MAX
+                        },
+                    ),
+                    (self.columns, if self.tty { self.rows } else { usize::MAX }),
+                    self.alternate,
                     &mut bytes,
                 );
             }
