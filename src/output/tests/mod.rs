@@ -25,6 +25,7 @@ fn frame(lines: &[&str]) -> Frame {
             })
             .collect(),
         static_lines: Vec::new(),
+        static_changed: false,
     }
 }
 

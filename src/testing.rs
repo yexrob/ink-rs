@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use crate::{ColorLevel, Element, RenderOptions, runtime::Runtime};
+use crate::{ColorLevel, Element, RenderOptions, paint::serialize_row, runtime::Runtime};
 
 /// Mounts at 100 columns with basic colors, matching Ink's debug test helper.
 pub fn render(element: impl Into<Element>) -> TestInstance {
@@ -21,6 +21,7 @@ pub fn render_with(element: impl Into<Element>, options: RenderOptions) -> TestI
     let mut instance = TestInstance {
         runtime: Runtime::new(element.into(), options),
         frames: Vec::new(),
+        static_output: String::new(),
     };
     instance.step();
     instance
@@ -30,15 +31,20 @@ pub fn render_with(element: impl Into<Element>, options: RenderOptions) -> TestI
 pub struct TestInstance {
     runtime: Runtime,
     frames: Vec<String>,
+    static_output: String,
 }
 
 impl TestInstance {
-    /// The last presented frame, with Static output before the live tree.
+    /// The last presented frame: accumulated Static rows, each followed by a
+    /// newline, then live rows joined by newlines, matching Ink's debug output.
+    /// Static history resets when the first Static instance changes.
     pub fn last_frame(&self) -> &str {
         self.frames.last().map_or("", String::as_str)
     }
 
-    /// One serialized frame for each present, including unchanged output.
+    /// One debug-output frame per present, including unchanged output. Each
+    /// contains accumulated Static rows and their newlines before the live rows.
+    /// Static history resets when the first Static instance changes.
     pub fn frames(&self) -> &[String] {
         &self.frames
     }
@@ -60,7 +66,23 @@ impl TestInstance {
     }
 
     fn step(&mut self) -> Option<Instant> {
-        self.runtime
-            .render_if_due(Instant::now(), |frame| self.frames.push(frame.serialize()))
+        self.runtime.render_if_due(Instant::now(), |frame| {
+            // Ink handleStaticChange resets history before onRender appends it.
+            if frame.static_changed {
+                self.static_output.clear();
+            }
+            for row in &frame.static_lines {
+                self.static_output.push_str(&serialize_row(row));
+                // renderer.ts preserves the newline even for a blank Static row.
+                self.static_output.push('\n');
+            }
+            let live = frame
+                .live
+                .iter()
+                .map(|row| serialize_row(row))
+                .collect::<Vec<_>>()
+                .join("\n");
+            self.frames.push(format!("{}{live}", self.static_output));
+        })
     }
 }

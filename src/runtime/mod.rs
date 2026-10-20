@@ -147,6 +147,10 @@ struct Instance {
     dirty: Rc<Dirty>,
     background: Option<Color>,
     store: Rc<Store>,
+    written: usize,
+    // Includes descendants so Static.tsx's post-write item removal can skip
+    // branches with no new items, including the whole tree on live-only commits.
+    pending_static: bool,
 }
 
 impl Instance {
@@ -161,6 +165,8 @@ impl Instance {
             dirty: Dirty::new(parent),
             background: None,
             store: store.clone(),
+            written: 0,
+            pending_static: false,
         }
     }
 
@@ -240,6 +246,43 @@ impl Instance {
             }
         }
     }
+
+    fn first_static(&self) -> Option<Rc<Dirty>> {
+        // Ink reconciler.ts findStaticNode uses preorder, including hidden nodes.
+        // Dirty belongs to the instance, so host arena slot reuse cannot alias it.
+        if matches!(self.element.0, Node::Static(_)) {
+            Some(self.dirty.clone())
+        } else {
+            self.children.iter().find_map(Self::first_static)
+        }
+    }
+
+    fn finish_static(&mut self, tree: &mut HostTree, cleanups: &mut Cleanups) {
+        if !self.pending_static {
+            return;
+        }
+        if let Node::Static(value) = &self.element.0
+            && self.written < value.len
+        {
+            self.written = value.len;
+            for child in &mut self.children {
+                remove(child, tree, cleanups);
+            }
+            self.children.clear();
+            let mut style = value.style.clone();
+            style.display = Display::None;
+            update_view(self, style, true, tree);
+        } else {
+            for child in &mut self.children {
+                child.finish_static(tree, cleanups);
+            }
+        }
+        self.pending_static = false;
+        // Discard updates owned by retired items, but retain live effect updates.
+        self.dirty
+            .descendants
+            .set(self.children.iter().any(|child| child.dirty.pending()));
+    }
 }
 
 pub(crate) struct Runtime {
@@ -251,6 +294,7 @@ pub(crate) struct Runtime {
     cleanups: Cleanups,
     next: Option<Element>,
     options: RenderOptions,
+    previous_static: Option<Rc<Dirty>>,
 }
 
 impl Runtime {
@@ -279,6 +323,7 @@ impl Runtime {
             cleanups: Cleanups::default(),
             next: Some(Element::fragment([element])),
             options,
+            previous_static: None,
         }
     }
 
@@ -378,16 +423,39 @@ impl Runtime {
 
     /// The caller consumes the painted frame before passive effects run.
     fn present(&mut self, write: impl FnOnce(paint::Frame)) {
-        let frame = {
+        let mut frame = {
             let _guard = RenderGuard::enter();
             paint::paint(&self.tree, self.root, self.options.color_level)
         };
+        let first_static = self.instance.first_static();
+        frame.static_changed = match (&self.previous_static, &first_static) {
+            (Some(previous), Some(current)) => !Rc::ptr_eq(previous, current),
+            (None, None) => false,
+            _ => true,
+        };
+        self.previous_static = first_static;
         write(frame);
         self.instance
             .collect_cleanups(false, &mut self.cleanups.passive);
         drain(&mut self.cleanups.passive);
         drain(&mut self.cleanups.states);
         self.instance.effects(false);
+        // React performSyncWorkOnRoot flushes passive effects before the sync
+        // setIndex update from Static.tsx unmounts the items.
+        if self.instance.pending_static {
+            self.instance
+                .finish_static(&mut self.tree, &mut self.cleanups);
+            for (node, _) in self.cleanups.refs.drain(..) {
+                if let Some(node_ref) = self.refs.remove(&usize::from(node)) {
+                    node_ref.refresh(ElementMetrics::default());
+                }
+            }
+            drain(&mut self.cleanups.layout);
+            drain(&mut self.cleanups.passive);
+            drain(&mut self.cleanups.states);
+            // Host mutations invalidate layout caches. Every subsequent present
+            // goes through commit's layout pass, even if reconciliation bails out.
+        }
     }
 }
 
@@ -546,7 +614,13 @@ fn reconcile(
         }
         Node::View(view) if render => Some(view.children.clone()),
         Node::Static(value) if render => {
-            Some((0..value.len).map(|index| (value.render)(index)).collect())
+            // Static.tsx sets index to items.length on shrink as well as append.
+            instance.written = instance.written.min(value.len);
+            Some(
+                (instance.written..value.len)
+                    .map(|index| (value.render)(index))
+                    .collect(),
+            )
         }
         Node::Text(text) if render => Some(text.children.clone()),
         Node::Transform(transform) if render => Some(transform.children.clone()),
@@ -576,7 +650,7 @@ fn reconcile(
         }
         Node::Static(value) => {
             let mut style = value.style.clone();
-            if value.len == 0 {
+            if instance.written == value.len {
                 style.display = Display::None;
             }
             update_view(instance, style, true, tree);
@@ -616,6 +690,8 @@ fn reconcile(
         _ => {}
     }
     instance.rendered = true;
+    instance.pending_static = matches!(&node, Node::Static(value) if instance.written < value.len)
+        || instance.children.iter().any(|child| child.pending_static);
     changed
 }
 

@@ -343,6 +343,219 @@ fn static_output() {
 }
 
 #[test]
+fn static_padding_is_not_emitted_again_when_there_are_no_new_items() {
+    fn example(_: &mut Scope, (status, items): &(&str, Vec<&'static str>)) -> Element {
+        Element::fragment::<[Element; 2]>([
+            Static::new(items.clone(), |item, _| Text::new(*item).key(*item))
+                .padding(1)
+                .into(),
+            Text::new(*status).into(),
+        ])
+    }
+    let mut instance = testing::render(component(example, ("Waiting", vec!["A"])));
+    assert_eq!(instance.last_frame(), "\n A\n\nWaiting");
+    instance.rerender(component(example, ("Ready", vec!["A"])));
+    assert_eq!(instance.last_frame(), "\n A\n\nReady");
+    instance.rerender(component(example, ("Done", vec!["A", "B"])));
+    assert_eq!(instance.last_frame(), "\n A\n\n\n B\n\nDone");
+}
+
+#[test]
+fn skip_previous_output_when_rendering_new_static_output() {
+    fn dynamic(_: &mut Scope, (items,): &(Vec<&'static str>,)) -> Element {
+        Static::new(items.clone(), |item, _| Text::new(*item).key(*item)).into()
+    }
+    let mut instance = testing::render(component(dynamic, (vec!["A"],)));
+    assert_eq!(instance.last_frame(), "A\n");
+    instance.rerender(component(dynamic, (vec!["A", "B"],)));
+    assert_eq!(instance.last_frame(), "A\nB\n");
+}
+
+#[test]
+fn static_output_stops_accumulating_after_static_unmounts_904() {
+    fn app(_: &mut Scope, show: &bool) -> Element {
+        View::new()
+            .child(show.then(|| Static::new(vec!["A", "B"], |item, _| Text::new(*item).key(*item))))
+            .child(Text::new("Dynamic"))
+            .into()
+    }
+    let mut instance = testing::render(component(app, true));
+    instance.rerender(component(app, false));
+    let length = instance.last_frame().len();
+    for _ in 0..10 {
+        instance.rerender(component(app, false));
+    }
+    assert_eq!(instance.last_frame().len(), length);
+    assert!(instance.last_frame().contains("Dynamic"));
+}
+
+#[test]
+fn full_static_output_is_reset_when_static_unmounts_so_stale_items_are_not_replayed() {
+    fn app(_: &mut Scope, (show, label): &(bool, &str)) -> Element {
+        View::new()
+            .child(show.then(|| {
+                Static::new(vec!["HISTORY-A", "HISTORY-B"], |item, _| {
+                    Text::new(*item).key(*item)
+                })
+            }))
+            .child(Text::new(*label))
+            .into()
+    }
+    let mut instance = testing::render(component(app, (true, "d1")));
+    assert!(instance.last_frame().contains("HISTORY-A"));
+    assert!(instance.last_frame().contains("HISTORY-B"));
+    instance.rerender(component(app, (false, "d2")));
+    assert!(!instance.last_frame().contains("HISTORY-A"));
+    assert!(!instance.last_frame().contains("HISTORY-B"));
+    assert!(instance.last_frame().contains("d2"));
+}
+
+#[test]
+fn unmounting_an_ancestor_of_static_clears_static_node_and_does_not_crash_the_renderer() {
+    fn wrapper(_: &mut Scope, _: &()) -> Element {
+        View::new()
+            .child(Static::new(vec!["HISTORY-X"], |item, _| {
+                Text::new(*item).key(*item)
+            }))
+            .into()
+    }
+    fn app(_: &mut Scope, (show, label): &(bool, &str)) -> Element {
+        View::new()
+            .child(show.then(|| component(wrapper, ())))
+            .child(Text::new(*label))
+            .into()
+    }
+    let mut instance = testing::render(component(app, (true, "live-1")));
+    assert!(instance.last_frame().contains("HISTORY-X"));
+    instance.rerender(component(app, (false, "live-2")));
+    assert!(instance.last_frame().contains("live-2"));
+    assert!(!instance.last_frame().contains("HISTORY-X"));
+    instance.rerender(component(app, (false, "live-3")));
+    assert_eq!(instance.last_frame(), "live-3");
+}
+
+#[test]
+fn removing_a_static_ancestor_that_is_a_direct_child_of_the_root_does_not_crash() {
+    fn app(_: &mut Scope, (show, label): &(bool, &str)) -> Element {
+        Element::fragment::<[Element; 2]>([
+            show.then(|| {
+                View::new().child(Static::new(vec!["ROOT-HISTORY"], |item, _| {
+                    Text::new(*item).key(*item)
+                }))
+            })
+            .into(),
+            Text::new(*label).into(),
+        ])
+    }
+    let mut instance = testing::render(component(app, (true, "root-1")));
+    assert!(instance.last_frame().contains("ROOT-HISTORY"));
+    instance.rerender(component(app, (false, "root-2")));
+    assert!(instance.last_frame().contains("root-2"));
+    assert!(!instance.last_frame().contains("ROOT-HISTORY"));
+}
+
+#[test]
+fn separate_ink_instances_do_not_clobber_each_others_static_node() {
+    fn app(_: &mut Scope, (show, label): &(bool, &str)) -> Element {
+        View::new()
+            .child(show.then(|| {
+                View::new().child(Static::new(vec![format!("{label}-history")], |item, _| {
+                    Text::new(item.clone()).key(item.clone())
+                }))
+            }))
+            .child(Text::new(*label))
+            .into()
+    }
+    let mut first = testing::render(component(app, (true, "first")));
+    let mut second = testing::render(component(app, (true, "second")));
+    first.rerender(component(app, (false, "first-2")));
+    assert!(first.last_frame().contains("first-2"));
+    assert!(!first.last_frame().contains("first-history"));
+    second.rerender(component(app, (false, "second-2")));
+    assert!(second.last_frame().contains("second-2"));
+    first.unmount();
+    second.unmount();
+}
+
+#[test]
+fn updating_static_in_one_instance_after_another_instance_mounted_static_sets_the_dirty_flag_on_the_correct_root()
+ {
+    fn app(_: &mut Scope, (items, label): &(Vec<&'static str>, &str)) -> Element {
+        View::new()
+            .child(Static::new(items.clone(), |item, _| {
+                Text::new(*item).key(*item)
+            }))
+            .child(Text::new(*label))
+            .into()
+    }
+    let mut first = testing::render(component(app, (vec!["A"], "first")));
+    let mut second = testing::render(component(app, (vec!["X"], "second")));
+    first.rerender(component(app, (vec!["A", "B"], "first")));
+    assert!(first.last_frame().contains('B'));
+    second.rerender(component(app, (vec!["X", "Y"], "second")));
+    assert!(second.last_frame().contains('Y'));
+    first.unmount();
+    second.unmount();
+}
+
+#[test]
+fn remounting_static_via_key_change_emits_the_new_items_nested_under_box() {
+    fn app(_: &mut Scope, session: &u32) -> Element {
+        let items = if *session == 1 {
+            vec!["old-A", "old-B"]
+        } else {
+            vec!["new-C", "new-D"]
+        };
+        View::new()
+            .child(
+                Static::new(items, |item, _| Text::new(*item).key(*item)).key(session.to_string()),
+            )
+            .child(Text::new("dynamic"))
+            .into()
+    }
+    let mut instance = testing::render(component(app, 1));
+    assert!(instance.last_frame().contains("old-A"));
+    assert!(instance.last_frame().contains("old-B"));
+    instance.rerender(component(app, 2));
+    assert!(instance.last_frame().contains("new-C"));
+    assert!(instance.last_frame().contains("new-D"));
+}
+
+#[test]
+fn remounting_static_via_key_change_emits_the_new_items_root_level_remove_child_from_container() {
+    fn app(_: &mut Scope, session: &u32) -> Element {
+        let items = if *session == 1 {
+            vec!["old-A", "old-B"]
+        } else {
+            vec!["new-C", "new-D"]
+        };
+        Static::new(items, |item, _| Text::new(*item).key(*item)).key(session.to_string())
+    }
+    let mut instance = testing::render(component(app, 1));
+    assert!(instance.last_frame().contains("old-A"));
+    assert!(instance.last_frame().contains("old-B"));
+    instance.rerender(component(app, 2));
+    assert!(instance.last_frame().contains("new-C"));
+    assert!(instance.last_frame().contains("new-D"));
+}
+
+#[test]
+fn render_only_new_items_in_static_output_on_final_render() {
+    fn dynamic(_: &mut Scope, (items,): &(Vec<&'static str>,)) -> Element {
+        Static::new(items.clone(), |item, _| Text::new(*item).key(*item)).into()
+    }
+    let mut instance = testing::render(component(dynamic, (Vec::<&str>::new(),)));
+    assert_eq!(instance.last_frame(), "");
+    instance.rerender(component(dynamic, (vec!["A"],)));
+    assert_eq!(instance.last_frame(), "A\n");
+    instance.rerender(component(dynamic, (vec!["A", "B"],)));
+    // Ink #397: no render is pending and Static output was rendered, so unmount
+    // writes no new content. Check that last content frame before consuming self.
+    assert_eq!(instance.last_frame(), "A\nB\n");
+    instance.unmount();
+}
+
+#[test]
 fn ensure_wrap_ansi_doesnt_trim_leading_whitespace() {
     let output = render(Text::new(" ERROR ").color(Color::Red));
     assert_ansi_eq(&output, &styled(&["{fg=red} ERROR {/}"]));

@@ -29,6 +29,8 @@ impl Cell {
 pub(crate) struct Frame {
     pub(crate) live: Vec<Vec<Cell>>,
     pub(crate) static_lines: Vec<Vec<Cell>>,
+    /// The first Static instance differs from the one at the previous present.
+    pub(crate) static_changed: bool,
 }
 
 impl Frame {
@@ -36,10 +38,14 @@ impl Frame {
         self.static_lines
             .iter()
             .chain(&self.live)
-            .map(|row| styled::serialize(&row_to_line(row)))
+            .map(|row| serialize_row(row))
             .collect::<Vec<_>>()
             .join("\n")
     }
+}
+
+pub(crate) fn serialize_row(row: &[Cell]) -> String {
+    styled::serialize(&row_to_line(row))
 }
 
 fn row_to_line(row: &[Cell]) -> StyledLine {
@@ -213,6 +219,7 @@ pub(crate) fn paint(tree: &HostTree, root: NodeId, level: ColorLevel) -> Frame {
     let mut frame = Frame {
         live: grid(layout.size.width, layout.size.height),
         static_lines: Vec::new(),
+        static_changed: false,
     };
     walk(
         tree,
