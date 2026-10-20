@@ -74,7 +74,7 @@ impl Output {
         if !frame.static_lines.is_empty() {
             // Ink src/ink.tsx:802-815 clears live output before new Static rows.
             self.move_to((0, 0), &mut bytes);
-            bytes.extend_from_slice(b"\x1b[J");
+            erase_down(&mut bytes);
             for row in &frame.static_lines {
                 write_cells(&content(row, columns), &mut bytes);
                 bytes.extend_from_slice(b"\r\n");
@@ -150,7 +150,7 @@ impl Output {
             // Rows below a declared cursor may have been dropped on resize.
             // Returning from the old bottom would erase history above the frame.
             self.move_to((0, 0), &mut bytes);
-            bytes.extend_from_slice(b"\x1b[J");
+            erase_down(&mut bytes);
         } else {
             for y in 0..self.live.len() {
                 self.move_to((0, y), &mut bytes);
@@ -188,7 +188,7 @@ impl Output {
             if above + offset > 0 {
                 output.extend_from_slice(format!("\x1b[{}A", above + offset).as_bytes());
             }
-            output.extend_from_slice(b"\r\x1b[J");
+            erase_down(output);
             self.forget();
         } else if height_decreased && self.declared.is_some() {
             // Ink src/ink.tsx resized uses the painted cursor, not a pending commit's.
@@ -196,7 +196,8 @@ impl Output {
         } else if height_decreased && self.live.len() >= rows {
             // Ink shouldClearTerminalForFrame measures wasFullscreen against
             // the new rows: the terminal has scrolled the frame's top away.
-            output.extend_from_slice(b"\x1b[1;1H\x1b[J");
+            output.extend_from_slice(b"\x1b[1;1H");
+            erase_down(output);
             self.forget();
         }
     }
@@ -296,6 +297,12 @@ fn reflow(row: &[Cell], columns: usize, cursor: usize) -> (usize, usize) {
     }
     // tmux puts a cursor past the content at the end of its logical line.
     (y + 1, cursor_row.unwrap_or(y))
+}
+
+// tmux (scroll-on-clear, on by default) scrolls the screen into history on ED
+// from the home position. Erase the cursor row with EL and start ED one cell in.
+fn erase_down(bytes: &mut Vec<u8>) {
+    bytes.extend_from_slice(b"\x1b[2K\x1b[C\x1b[J\r");
 }
 
 fn is_continuation(row: &[Cell], x: usize) -> bool {

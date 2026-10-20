@@ -657,7 +657,7 @@ impl ReflowLine {
 
 pub fn assert_no_full_clear(terminal: &ink_rs::testing::TestTerminal) {
     let output = terminal.writes().join("");
-    for sequence in ["\x1b[2J", "\x1b[3J", "\x1b[1;1H\x1b[J"] {
+    for sequence in ["\x1b[2J", "\x1b[3J", "\x1b[1;1H\x1b[2K\x1b[C\x1b[J"] {
         assert!(!output.contains(sequence), "{output:?}");
     }
 }

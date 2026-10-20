@@ -286,7 +286,7 @@ fn issue_450_viewport_shrink_into_overflow_should_clear_once() {
     app.advance(Duration::ZERO);
     screen.update(&terminal);
     let bytes = terminal.writes()[before..].join("");
-    assert_eq!(bytes.matches("\x1b[1;1H\x1b[J").count(), 1);
+    assert_eq!(bytes.matches("\x1b[1;1H\x1b[2K\x1b[C\x1b[J").count(), 1);
     assert!(!bytes.contains("\x1b[2J"));
     assert!(!bytes.contains("\x1b[3J"));
 }
