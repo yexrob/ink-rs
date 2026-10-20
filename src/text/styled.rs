@@ -19,13 +19,11 @@ impl Hyperlink {
             .or_else(|| sequence.strip_prefix('\u{9d}'))?;
         let (payload, terminator) = if let Some(payload) = payload.strip_suffix('\x07') {
             (payload, "\x07")
-        } else if let Some(payload) = payload
-            .strip_suffix("\x1b\\")
-            .or_else(|| payload.strip_suffix('\u{9c}'))
-        {
-            (payload, "\x1b\\")
         } else {
-            return None;
+            let payload = payload
+                .strip_suffix("\x1b\\")
+                .or_else(|| payload.strip_suffix('\u{9c}'))?;
+            (payload, "\x1b\\")
         };
         let (_, uri) = payload.strip_prefix("8;")?.split_once(';')?;
         Some(if uri.is_empty() {
