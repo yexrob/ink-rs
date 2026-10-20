@@ -1,7 +1,7 @@
 use std::any::{Any, TypeId};
-use std::cell::Cell;
 use std::rc::Rc;
 
+use super::Dirty;
 use super::state::{State, StateSlot, Store};
 
 type Setup = Box<dyn FnOnce() -> Box<dyn Any>>;
@@ -38,7 +38,7 @@ pub(super) struct Hook {
 pub struct Scope<'a> {
     pub(super) hooks: &'a mut Vec<Hook>,
     pub(super) store: &'a Rc<Store>,
-    pub(super) dirty: Rc<Cell<bool>>,
+    pub(super) dirty: Rc<Dirty>,
     pub(super) name: &'static str,
     pub(super) cursor: usize,
 }

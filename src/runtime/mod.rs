@@ -1,7 +1,8 @@
 use std::any::{Any, TypeId, type_name};
 use std::cell::Cell;
 use std::fmt;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
+use std::time::Instant;
 
 use taffy::NodeId;
 
@@ -17,6 +18,9 @@ use state::{RenderGuard, Store};
 
 mod hooks;
 mod state;
+
+#[cfg(test)]
+mod tests;
 
 pub use hooks::Scope;
 pub use state::State;
@@ -84,26 +88,73 @@ where
     )
 }
 
+// React markUpdateLaneFromFiberToRoot bubbles childLanes to the owning root.
+pub(crate) struct Dirty {
+    own: Cell<bool>,
+    descendants: Cell<bool>,
+    mounted: Cell<bool>,
+    parent: Weak<Dirty>,
+}
+
+impl Dirty {
+    fn new(parent: Weak<Self>) -> Rc<Self> {
+        Rc::new(Self {
+            own: Cell::new(false),
+            descendants: Cell::new(false),
+            mounted: Cell::new(true),
+            parent,
+        })
+    }
+
+    fn pending(&self) -> bool {
+        self.own.get() || self.descendants.get()
+    }
+
+    fn mark(&self) {
+        self.own.set(true);
+        let mut parent = self.parent.upgrade();
+        while let Some(node) = parent {
+            if node.descendants.replace(true) {
+                break;
+            }
+            parent = node.parent.upgrade();
+        }
+    }
+}
+
+#[derive(Default)]
+struct Cleanups {
+    layout: Vec<Box<dyn Any>>,
+    passive: Vec<Box<dyn Any>>,
+    states: Vec<Box<dyn Any>>,
+}
+
+fn drain(values: &mut Vec<Box<dyn Any>>) {
+    for value in values.drain(..) {
+        drop(value);
+    }
+}
+
 struct Instance {
     element: Element,
     children: Vec<Instance>,
     host: Option<NodeId>,
     hooks: Vec<Hook>,
     rendered: bool,
-    dirty: Rc<Cell<bool>>,
+    dirty: Rc<Dirty>,
     background: Option<Color>,
     store: Rc<Store>,
 }
 
 impl Instance {
-    fn new(element: Element, store: &Rc<Store>) -> Self {
+    fn new(element: Element, store: &Rc<Store>, parent: Weak<Dirty>) -> Self {
         Self {
             element,
             children: Vec::new(),
             host: None,
             hooks: Vec::new(),
             rendered: false,
-            dirty: Rc::new(Cell::new(false)),
+            dirty: Dirty::new(parent),
             background: None,
             store: store.clone(),
         }
@@ -117,42 +168,43 @@ impl Instance {
             }
     }
 
-    fn has_dirty(&self) -> bool {
-        self.dirty.get() || self.children.iter().any(Self::has_dirty)
-    }
-
-    fn retire(&mut self, cleanups: &mut Vec<Box<dyn Any>>) {
-        // React commitDeletionEffects traverses parent before child on unmount.
-        let mut states: Vec<Box<dyn Any>> = Vec::new();
+    fn retire(&mut self, cleanups: &mut Cleanups) {
+        self.dirty.mounted.set(false);
+        // React commitDeletionEffects visits parents before children. Passive
+        // deletion effects and state detachment belong to the post-present phase.
         for hook in self.hooks.drain(..) {
             match hook.value {
-                Value::State { slot, .. } => states.push(Box::new(slot)),
+                Value::State { slot, .. } => cleanups.states.push(Box::new(slot)),
                 Value::Effect(mut effect) => {
                     if let Some(cleanup) = effect.cleanup.take() {
-                        cleanups.push(cleanup);
+                        if matches!(hook.kind, Kind::LayoutEffect(_)) {
+                            cleanups.layout.push(cleanup);
+                        } else {
+                            cleanups.passive.push(cleanup);
+                        }
                     }
                 }
-                Value::Memo(value) => cleanups.push(value),
+                Value::Memo(value) => cleanups.states.push(value),
             }
         }
         for child in &mut self.children {
             child.retire(cleanups);
         }
-        // React detaches hook state after unmount effects: cleanup can read its owner.
-        cleanups.extend(states);
     }
 
-    fn collect_cleanups(&mut self, cleanups: &mut Vec<Box<dyn Any>>) {
+    fn collect_cleanups(&mut self, layout: bool, cleanups: &mut Vec<Box<dyn Any>>) {
+        // React commitHookEffectListUnmount handles updates child before parent.
+        for child in &mut self.children {
+            child.collect_cleanups(layout, cleanups);
+        }
         for hook in &mut self.hooks {
-            if let Value::Effect(effect) = &mut hook.value
+            if matches!(hook.kind, Kind::LayoutEffect(_)) == layout
+                && let Value::Effect(effect) = &mut hook.value
                 && effect.setup.is_some()
                 && let Some(cleanup) = effect.cleanup.take()
             {
                 cleanups.push(cleanup);
             }
-        }
-        for child in &mut self.children {
-            child.collect_cleanups(cleanups);
         }
     }
 
@@ -186,7 +238,8 @@ pub(crate) struct Runtime {
     tree: HostTree,
     root: NodeId,
     instance: Instance,
-    cleanups: Vec<Box<dyn Any>>,
+    cleanups: Cleanups,
+    next: Option<Element>,
     options: RenderOptions,
 }
 
@@ -207,20 +260,41 @@ impl Runtime {
         Self {
             tree,
             root,
-            instance: Instance::new(Element::fragment([element]), &store),
-            cleanups: Vec::new(),
+            instance: Instance::new(
+                Element::fragment(Vec::<Element>::new()),
+                &store,
+                Weak::new(),
+            ),
+            cleanups: Cleanups::default(),
+            next: Some(Element::fragment([element])),
             options,
         }
     }
 
-    /// The caller consumes the painted frame before passive effects run.
-    pub(crate) fn frame(&mut self, write: impl FnOnce(paint::Frame)) {
+    pub(crate) fn rerender(&mut self, element: Element) {
+        self.next = Some(Element::fragment([element]));
+    }
+
+    pub(crate) fn render_if_due(
+        &mut self,
+        now: Instant,
+        write: impl FnOnce(paint::Frame),
+    ) -> Option<Instant> {
+        if self.next.is_none() && !self.instance.dirty.pending() {
+            return None;
+        }
+        self.commit();
+        self.present(write);
+        self.instance.dirty.pending().then_some(now)
+    }
+
+    fn commit(&mut self) {
         for round in 0..50 {
             {
                 let _guard = RenderGuard::enter();
                 reconcile(
                     &mut self.instance,
-                    None,
+                    self.next.take(),
                     false,
                     None,
                     &mut self.tree,
@@ -229,17 +303,15 @@ impl Runtime {
                 );
                 order_children(&mut self.tree, self.root, &self.instance.children);
             }
-            // React's mutation unmount phase precedes layout/passive setup.
-            self.instance.collect_cleanups(&mut self.cleanups);
-            for cleanup in self.cleanups.drain(..) {
-                drop(cleanup);
-            }
+            self.instance
+                .collect_cleanups(true, &mut self.cleanups.layout);
+            drain(&mut self.cleanups.layout);
             {
                 let _guard = RenderGuard::enter();
                 layout::compute(&mut self.tree, self.root);
             }
             self.instance.effects(true);
-            if !self.instance.has_dirty() {
+            if !self.instance.dirty.pending() {
                 break;
             }
             assert!(
@@ -247,11 +319,19 @@ impl Runtime {
                 "maximum update depth exceeded (50 layout-effect rounds)"
             );
         }
+    }
+
+    /// The caller consumes the painted frame before passive effects run.
+    fn present(&mut self, write: impl FnOnce(paint::Frame)) {
         let frame = {
             let _guard = RenderGuard::enter();
             paint::paint(&self.tree, self.root, self.options.color_level)
         };
         write(frame);
+        self.instance
+            .collect_cleanups(false, &mut self.cleanups.passive);
+        drain(&mut self.cleanups.passive);
+        drain(&mut self.cleanups.states);
         self.instance.effects(false);
     }
 }
@@ -259,13 +339,13 @@ impl Runtime {
 impl Drop for Runtime {
     fn drop(&mut self) {
         self.instance.retire(&mut self.cleanups);
-        for cleanup in self.cleanups.drain(..) {
-            drop(cleanup);
-        }
+        drain(&mut self.cleanups.layout);
+        drain(&mut self.cleanups.passive);
+        drain(&mut self.cleanups.states);
     }
 }
 
-fn remove(instance: &mut Instance, tree: &mut HostTree, cleanups: &mut Vec<Box<dyn Any>>) {
+fn remove(instance: &mut Instance, tree: &mut HostTree, cleanups: &mut Cleanups) {
     instance.retire(cleanups);
     let mut roots = Vec::new();
     instance.host_roots(&mut roots);
@@ -281,7 +361,7 @@ fn reconcile_children(
     background: Option<Color>,
     tree: &mut HostTree,
     level: ColorLevel,
-    cleanups: &mut Vec<Box<dyn Any>>,
+    cleanups: &mut Cleanups,
 ) -> bool {
     let mut changed = false;
     if let Some(next) = next {
@@ -308,7 +388,13 @@ fn reconcile_children(
                 remove(child.as_mut().unwrap(), tree, cleanups);
                 child = None;
             }
-            let child = child.unwrap_or_else(|| Instance::new(element.clone(), &instance.store));
+            let child = child.unwrap_or_else(|| {
+                Instance::new(
+                    element.clone(),
+                    &instance.store,
+                    Rc::downgrade(&instance.dirty),
+                )
+            });
             // Retain ownership in the tree before user render code can unwind.
             instance.children.insert(index, child);
             positions.insert(index, None);
@@ -329,6 +415,9 @@ fn reconcile_children(
         instance.children.truncate(length);
     } else {
         for child in &mut instance.children {
+            if !child.dirty.pending() && child.background == background {
+                continue;
+            }
             changed |= reconcile(child, None, inside_text, background, tree, level, cleanups);
         }
     }
@@ -342,11 +431,11 @@ fn reconcile(
     background: Option<Color>,
     tree: &mut HostTree,
     level: ColorLevel,
-    cleanups: &mut Vec<Box<dyn Any>>,
+    cleanups: &mut Cleanups,
 ) -> bool {
     let supplied = next.is_some();
     let context_changed = instance.background != background;
-    if instance.rendered && !supplied && !context_changed && !instance.has_dirty() {
+    if instance.rendered && !supplied && !context_changed && !instance.dirty.pending() {
         return false;
     }
     let mut render = !instance.rendered || supplied;
@@ -358,9 +447,10 @@ fn reconcile(
     if let Some(next) = next {
         instance.element = next;
     }
-    if !render && !context_changed && !instance.has_dirty() {
+    if !render && !context_changed && !instance.dirty.pending() {
         return false;
     }
+    instance.dirty.descendants.set(false);
     let mut changed = !instance.rendered || supplied || context_changed;
     instance.background = background;
     let node = instance.element.0.clone();
@@ -373,7 +463,7 @@ fn reconcile(
     let text = matches!(node, Node::Text(_) | Node::Transform(_));
     let next_children = match &node {
         Node::Component(component) => {
-            let dirty = instance.dirty.replace(false);
+            let dirty = instance.dirty.own.replace(false);
             if render || dirty {
                 let previous_count = instance.hooks.len();
                 let mut scope = Scope {

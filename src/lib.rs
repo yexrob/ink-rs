@@ -6,6 +6,8 @@
 //! schedule their owning component when written on the UI thread.
 //! [`render_to_string`] mounts a tree, settles layout effects, paints one
 //! frame, runs passive effects and unmounts with cleanup.
+//! [`testing::render`] keeps a tree mounted, records presented frames and
+//! exposes rerender and settle operations without terminal I/O.
 //!
 //! See `docs/design.md` for the architecture and the milestone plan.
 
@@ -20,6 +22,8 @@ mod render;
 mod runtime;
 mod style;
 mod text;
+
+pub mod testing;
 
 pub use border::{BorderStyle, BoxChars};
 pub use color::{Color, ColorLevel, ParseColorError};

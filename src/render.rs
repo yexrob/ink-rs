@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use crate::{ColorLevel, Element, runtime::Runtime};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,6 +31,6 @@ impl Default for RenderOptions {
 pub fn render_to_string(element: impl Into<Element>, options: RenderOptions) -> String {
     let mut runtime = Runtime::new(element.into(), options);
     let mut output = String::new();
-    runtime.frame(|frame| output = frame.serialize());
+    runtime.render_if_due(Instant::now(), |frame| output = frame.serialize());
     output
 }

@@ -5,6 +5,8 @@ use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use super::Dirty;
+
 thread_local! {
     static REGISTRY: RefCell<HashMap<u64, Weak<Store>>> = RefCell::new(HashMap::new());
     static RENDER_DEPTH: Cell<usize> = const { Cell::new(0) };
@@ -33,7 +35,7 @@ struct Slot {
 
 struct StateValue {
     value: RefCell<Box<dyn Any>>,
-    dirty: Rc<Cell<bool>>,
+    dirty: Rc<Dirty>,
 }
 
 pub(super) struct Store {
@@ -74,7 +76,7 @@ impl Store {
         store
     }
 
-    pub(super) fn allocate<T: 'static>(&self, value: T, dirty: Rc<Cell<bool>>) -> State<T> {
+    pub(super) fn allocate<T: 'static>(&self, value: T, dirty: Rc<Dirty>) -> State<T> {
         let value = Some(Rc::new(StateValue {
             value: RefCell::new(Box::new(value)),
             dirty,
@@ -163,6 +165,11 @@ impl<T: 'static> State<T> {
     {
         Self::assert_not_rendering();
         let Some(value) = self.resolve() else { return };
+        // The slot outlives unmount until passive cleanups have run; React
+        // ignores updates to unmounted components.
+        if !value.dirty.mounted.get() {
+            return;
+        }
         let previous = {
             let mut current = value.value.borrow_mut();
             if *current.downcast_ref::<T>().expect("state type") == next {
@@ -170,7 +177,7 @@ impl<T: 'static> State<T> {
             }
             std::mem::replace(&mut *current, Box::new(next))
         };
-        value.dirty.set(true);
+        value.dirty.mark();
         drop(previous);
     }
 
@@ -178,7 +185,10 @@ impl<T: 'static> State<T> {
     pub fn update(self, f: impl FnOnce(&mut T)) {
         Self::assert_not_rendering();
         let Some(value) = self.resolve() else { return };
-        value.dirty.set(true);
+        if !value.dirty.mounted.get() {
+            return;
+        }
+        value.dirty.mark();
         f(value
             .value
             .borrow_mut()
