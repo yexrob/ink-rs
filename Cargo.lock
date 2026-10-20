@@ -79,6 +79,7 @@ dependencies = [
  "unicode-normalization",
  "unicode-segmentation",
  "vt100",
+ "windows-sys",
 ]
 
 [[package]]

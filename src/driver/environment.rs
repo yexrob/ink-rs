@@ -7,8 +7,12 @@ pub(super) fn in_ci(env: impl Fn(&str) -> Option<String>) -> bool {
 }
 
 // Chalk's vendored supports-color, for fd 1. Libraries do not consume argv.
-pub(super) fn color_level(tty: bool, env: impl Fn(&str) -> Option<String>) -> ColorLevel {
-    let level = detect_color(tty, env);
+pub(super) fn color_level(
+    tty: bool,
+    windows: bool,
+    env: impl Fn(&str) -> Option<String>,
+) -> ColorLevel {
+    let level = detect_color(tty, windows, env);
     match level {
         0 => ColorLevel::None,
         1 => ColorLevel::Basic,
@@ -17,7 +21,7 @@ pub(super) fn color_level(tty: bool, env: impl Fn(&str) -> Option<String>) -> Co
     }
 }
 
-fn detect_color(tty: bool, env: impl Fn(&str) -> Option<String>) -> u8 {
+fn detect_color(tty: bool, windows: bool, env: impl Fn(&str) -> Option<String>) -> u8 {
     let force = env("FORCE_COLOR");
     let force = match force.as_deref() {
         None => None,
@@ -45,6 +49,10 @@ fn detect_color(tty: bool, env: impl Fn(&str) -> Option<String>) -> u8 {
     let term = env("TERM").unwrap_or_default();
     if term == "dumb" {
         return min;
+    }
+    // The Windows 10 1809 minimum exceeds supports-color's build 14931 cutoff.
+    if windows {
+        return 3;
     }
     if env("CI").is_some() {
         if ["GITHUB_ACTIONS", "GITEA_ACTIONS", "CIRCLECI"]

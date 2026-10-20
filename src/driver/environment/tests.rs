@@ -101,7 +101,7 @@ fn color_rules() {
         (true, vec![], NoColor),
     ] {
         assert_eq!(
-            color_level(tty, |key| env
+            color_level(tty, false, |key| env
                 .iter()
                 .find(|(k, _)| *k == key)
                 .map(|(_, v)| v.to_string())),

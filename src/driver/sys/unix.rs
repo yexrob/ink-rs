@@ -19,6 +19,7 @@ use super::super::{process, stdin};
 pub(in crate::driver) type Output = File;
 pub(in crate::driver) type SavedMode = Termios;
 pub(in crate::driver) type Termination = i32;
+pub(in crate::driver) const JOB_CONTROL: bool = true;
 
 // Duplicated fds bypass std::io::Stdout's LineWriter: a synchronized
 // operation containing newlines reaches File::write_all as one buffer.

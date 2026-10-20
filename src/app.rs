@@ -26,6 +26,7 @@ pub struct Options {
     /// Stop the process group on a Ctrl+Z press or repeat (default true), as
     /// the terminal's suspend key does. The shell's `fg` resumes the app.
     /// Those events do not reach `use_input`; a release does.
+    /// This option has no effect on Windows; Ctrl+Z reaches `use_input`.
     pub suspend_on_ctrl_z: bool,
     /// Opt-in kitty keyboard negotiation. Defaults to [`KittyKeyboard::Disabled`].
     pub kitty_keyboard: KittyKeyboard,
@@ -330,6 +331,7 @@ impl WriteDestination for RefCell<AppOutput> {
 
 pub(crate) enum Reason {
     Api,
+    #[cfg(unix)]
     Stop,
 }
 
@@ -367,6 +369,7 @@ impl App {
         let suspended = self.is_suspended();
         match reason {
             Reason::Api => self.api_suspended = true,
+            #[cfg(unix)]
             Reason::Stop => self.stop_suspended = true,
         }
         if suspended || self.runtime.is_none() {
@@ -405,6 +408,7 @@ impl App {
         }
         let flag = match reason {
             Reason::Api => &mut self.api_suspended,
+            #[cfg(unix)]
             Reason::Stop => &mut self.stop_suspended,
         };
         if !std::mem::take(flag) {

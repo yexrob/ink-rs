@@ -1,7 +1,9 @@
 use std::io::{self, Write};
 use std::panic;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Once, OnceLock, mpsc};
+#[cfg(unix)]
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex, Once, OnceLock};
 use std::thread::{self, ThreadId};
 
 use super::{Message, Post, stdin, sys};
@@ -327,6 +329,7 @@ pub(super) fn resize() {
     }
 }
 
+#[cfg(unix)]
 pub(super) fn stop() {
     let (ack, done) = mpsc::channel::<()>();
     {
@@ -343,6 +346,7 @@ pub(super) fn stop() {
     while done.recv().is_ok() {}
 }
 
+#[cfg(unix)]
 pub(super) fn resume() {
     let entries = registry().entries.lock().unwrap();
     for entry in entries.iter() {

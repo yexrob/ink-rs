@@ -24,7 +24,9 @@ pub(super) enum Message {
     Wake,
     Resize,
     Signal,
+    #[cfg(unix)]
     Stop(mpsc::Sender<()>),
+    #[cfg(unix)]
     Continue,
     Input(Vec<u8>),
     InputStarted,
@@ -67,10 +69,13 @@ pub fn render(element: impl Into<Element>, options: Options) -> Instance {
 
 fn mount<S: Post>(
     element: Element,
-    options: Options,
+    mut options: Options,
     sender: Arc<S>,
     now: fn() -> Instant,
 ) -> Mounted {
+    if !sys::JOB_CONTROL {
+        options.suspend_on_ctrl_z = false;
+    }
     let terminal = ProcessTerminal::new(sender.clone());
     let env = |key: &str| std::env::var_os(key).map(|value| value.to_string_lossy().into_owned());
     let interactive = resolve_interactive(
@@ -80,7 +85,7 @@ fn mount<S: Post>(
     );
     let color = options
         .color_level
-        .unwrap_or_else(|| environment::color_level(terminal.is_tty(), env));
+        .unwrap_or_else(|| environment::color_level(terminal.is_tty(), cfg!(windows), env));
     let registration = terminal.register(sender.clone());
     let mut app = App::new(
         element,
@@ -263,10 +268,12 @@ impl Looper {
                     Message::Wake => {}
                     Message::Resize => app.resize(app.terminal_size()),
                     Message::Signal => return Next::Stop(Stop::Signal),
+                    #[cfg(unix)]
                     Message::Stop(ack) => {
                         app.suspend(Reason::Stop);
                         drop(ack);
                     }
+                    #[cfg(unix)]
                     Message::Continue => app.resume(Reason::Stop),
                     Message::InputStarted => self.input_ended = false,
                     Message::InputEnded => self.input_ended = true,
@@ -291,12 +298,13 @@ impl Looper {
                 // leave_loop serializes with Stop fan-out. Release every preceding
                 // ack before user code can block, preserving other message order.
                 for event in std::iter::from_fn(&mut *poll) {
+                    #[cfg(unix)]
                     if let Message::Stop(ack) = event {
                         app.suspend(Reason::Stop);
                         drop(ack);
-                    } else {
-                        self.kept.push_back(event);
+                        continue;
                     }
+                    self.kept.push_back(event);
                 }
                 return Next::Suspend(callback);
             }

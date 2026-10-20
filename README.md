@@ -74,7 +74,7 @@ cargo run --example use-input
 
 ## Platform support
 
-Unix (macOS and Linux). Windows is not supported. The minimum supported Rust
+Linux, macOS and Windows 10 1809 (build 17763) or later. The minimum supported Rust
 version is 1.88.
 
 ## License
