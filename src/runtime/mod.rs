@@ -16,7 +16,7 @@ use crate::{
     layout, paint,
 };
 use hooks::{Hook, Kind, Value};
-use state::{RenderGuard, Store};
+use state::{NodeLayout, RenderGuard, Store};
 
 mod app_handle;
 mod focus;
@@ -34,7 +34,7 @@ pub use focus::{FocusManager, FocusOptions};
 pub use hooks::Scope;
 pub(crate) use output::WriteDestination;
 pub use output::{CursorPosition, OutputStream, OutputWriter};
-pub use state::{ElementMetrics, NodeRef, State, measure_element};
+pub use state::{BoxMetrics, ElementMetrics, NodeRef, State, measure_element};
 
 /// Dimensions of the window in character cells.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -485,7 +485,7 @@ impl Runtime {
             // commitLayoutEffects attaches refs and runs layout effects.
             for (node, _) in &self.cleanups.refs {
                 if let Some(node_ref) = self.refs.remove(&usize::from(*node)) {
-                    node_ref.refresh(ElementMetrics::default());
+                    node_ref.refresh(None);
                 }
             }
             for (node, node_ref) in self.cleanups.refs.drain(..) {
@@ -521,17 +521,25 @@ impl Runtime {
                     measured = Some(layout);
                 }
                 let layout = measured.expect("bound node has a layout path");
-                node_ref.refresh(ElementMetrics {
-                    x: origin.x,
-                    y: origin.y,
-                    width: layout.size.width as u32,
-                    height: layout.size.height as u32,
-                    client_width: (layout.size.width - layout.border.left - layout.border.right)
-                        as u32,
-                    client_height: (layout.size.height - layout.border.top - layout.border.bottom)
-                        as u32,
-                })
+                node_ref.refresh(Some(NodeLayout {
+                    left: layout.location.x as i32,
+                    top: layout.location.y as i32,
+                    metrics: ElementMetrics {
+                        x: origin.x,
+                        y: origin.y,
+                        width: layout.size.width as u32,
+                        height: layout.size.height as u32,
+                        client_width: (layout.size.width - layout.border.left - layout.border.right)
+                            as u32,
+                        client_height: (layout.size.height
+                            - layout.border.top
+                            - layout.border.bottom) as u32,
+                    },
+                }))
             });
+            // Ink's root layout listeners also reach memoized readers. Refs
+            // are attached here, so no passive effect or microtask is needed.
+            self.instance.store.check_box_readers();
             self.instance.effects(true);
             if !self.instance.dirty.pending() {
                 break;
@@ -581,7 +589,7 @@ impl Runtime {
             drain(&mut self.cleanups.insertion);
             for (node, _) in self.cleanups.refs.drain(..) {
                 if let Some(node_ref) = self.refs.remove(&usize::from(node)) {
-                    node_ref.refresh(ElementMetrics::default());
+                    node_ref.refresh(None);
                 }
             }
             drain(&mut self.cleanups.layout);

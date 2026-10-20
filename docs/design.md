@@ -56,7 +56,7 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
 - **空闲**：没有变化时零唤醒、零渲染，由测试保证。
 - **effect**：`use_layout_effect` 在布局之后、paint 之前执行，可以读元素尺寸，写状态会让这一帧在写出前重算，一帧写出一次。Ink 在提交时写出，之后执行 layout effect，状态变了写第二帧；ink-rs 不写这个中间帧。`use_effect` 在提交之后执行，这一帧没被节流时在写出之后，同 React：passive effect 跟着提交走，不等节流后的写出。清理靠返回值的 `Drop`；组件卸载时它的异步任务随 drop 取消。
 - **继承的属性**：View 的背景色经内建 context 传给后代 Text，同 Ink 的 `BackgroundContext`。背景色变化时，运行时更新下面受影响的 Text 节点，props 相等的组件不重跑：Ink 中重渲染的是读这个 context 的 Text，不是用户组件。
-- **元素尺寸**：`use_node_ref` 给出句柄，挂到 `View::node_ref`。`measure_element` 返回 x、y（相对根节点）、width、height，以及去掉边框的 client 尺寸，节点未挂载时全为 0。在 effect 和事件回调里读，读到的是最近一次布局。
+- **元素尺寸**：`use_node_ref` 给出句柄，挂到 `View::node_ref`。`measure_element` 返回 x、y（相对根节点）、width、height，以及去掉边框的 client 尺寸，节点未挂载时全为 0。在 effect 和事件回调里读，读到的是最近一次布局。`use_box_metrics(node_ref)` 返回 width、height、left、top（相对父节点）、client 尺寸和 `has_measured`，布局变化时重渲染调用它的组件。ref 的槽存 `Option<布局>`，`None` 表示未挂载。读者登记在 Store，提交的每一轮刷新 ref 后比较读者上次返回的度量，变了标脏，这一帧写出前重算；布局不变不标脏，空闲时没有提交，也不检查。
 
 ### 一帧
 

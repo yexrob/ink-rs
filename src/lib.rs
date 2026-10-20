@@ -50,8 +50,8 @@ pub use input::kitty::{KittyFlags, KittyKeyboard};
 pub use input::{KeyEvent, KeyEventType};
 pub use render::{RenderOptions, render_to_string};
 pub use runtime::{
-    AppHandle, CursorPosition, ElementMetrics, FocusManager, FocusOptions, NodeRef, OutputStream,
-    OutputWriter, Scope, State, WindowSize, component, measure_element,
+    AppHandle, BoxMetrics, CursorPosition, ElementMetrics, FocusManager, FocusOptions, NodeRef,
+    OutputStream, OutputWriter, Scope, State, WindowSize, component, measure_element,
 };
 pub use style::{
     AlignContent, AlignItems, AlignSelf, Dimension, Display, FlexDirection, FlexWrap, Inset,

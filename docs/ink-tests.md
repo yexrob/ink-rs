@@ -117,7 +117,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `text.tsx` | 57 | M0 / M1 | 49 | `tests/text.rs` |
 | `truncate-width.tsx` | 9 | M0 | 9 | `tests/truncate_width.rs` |
 | `use-animation.tsx` | 45 | M4 |  |  |
-| `use-box-metrics.tsx` | 19 | M4 |  |  |
+| `use-box-metrics.tsx` | 19 | M4 | 16 | `tests/use_box_metrics.rs` |
 | `width-height.tsx` | 29 | M0 / M1 | 25 | `tests/width_height.rs` |
 | `wrap-text.tsx` | 17 | M0 / M1 | 15 | `tests/wrap_text.rs`, `src/text/wrap/tests.rs` |
 | `write-synchronized.tsx` | 7 | — | 0 | 不适用，决策由 render / components 覆盖 |
@@ -345,6 +345,12 @@ Ink 有 95 个测试文件、1,646 个测试。
   - React 并发模式下的重复：`focus component renders in concurrent mode`、`focus component with autoFocus renders in concurrent mode`。
 - `focus-strict-mode.tsx`：只移植 `focus updates preserve call order (concurrent: false, StrictMode: false)`。并发模式的一个是重复；StrictMode 的两个不适用，ink-rs 没有 StrictMode。
 
+## M4 文件中不移植的测试
+
+- `use-box-metrics.tsx`：
+  - 不适用，Node EventEmitter；unmount 消耗 app：`removes resize listener on unmount`、`does not crash when resize fires after unmount`。
+  - 并发：`tracks a box mounted by child state - concurrent=true`。
+
 ## 缺 API
 
 - `onRender` / `renderTime`：本阶段不添加，影响 `render-callback.tsx` 和 `render.tsx` 的 `outputs renderTime when onRender is passed`。
@@ -375,6 +381,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 - **`flex-align-self.tsx` 的 `row - align self baseline`**：Yoga 在有子项按 baseline 对齐时按内容决定行高，`flex-end` 的子项随之贴在内容行的底部。taffy 按 CSS，单行容器的行高等于容器高度，移植版的期望值按 CSS 改写。
 
 - **layout effect 写状态时少写一帧。** Ink 在提交时写出，之后执行 layout effect，状态变了写第二帧。ink-rs 在 paint 前执行 layout effect，一帧写出一次。按写出次数或第一帧断言的测试随之调整。
+- **`use_box_metrics` 首帧给值。** Ink 先写出全 0 的帧，passive effect 加微任务后写出测量值。ink-rs 在提交的每一轮刷新 ref 之后比较读者的度量，变了就在 paint 前重渲染，View 首次布局的那一帧即带测量值。`does not trigger extra re-renders when layout is unchanged` 的渲染次数由 Ink 的 2–3 次改为 2 次（未挂载一次、测量后一次）；两个 resize 用例改用 `testing::mount` 与 vt100 屏幕。
 - **Static 追加时写出一次。** Ink 的 Static 靠 index 状态和 layout effect 隐藏已写出的条目，每次追加提交两次、写出两次。ink-rs 的 Static 是 host 节点，追加时写出一次。
 
 ## Ink 期望中反直觉的行为

@@ -1,11 +1,11 @@
 use std::any::{Any, TypeId};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use super::focus::{FocusManager, FocusOptions, FocusRegistration};
 use super::input::{Handler, InputHandler, PasteHandler, Registration};
 use super::output::{CursorCleanup, CursorPosition, OutputStream, OutputWriter};
-use super::state::{ElementMetrics, NodeRef, State, StateSlot, Store};
+use super::state::{BoxMetrics, BoxReader, NodeRef, State, StateSlot, Store};
 use super::{AppHandle, Dirty, WindowSize};
 use crate::KeyEvent;
 
@@ -215,9 +215,7 @@ impl Scope<'_> {
     pub fn use_node_ref(&mut self) -> NodeRef {
         let position = self.position(Kind::NodeRef);
         if position == self.hooks.len() {
-            let handle = self
-                .store
-                .allocate(ElementMetrics::default(), self.dirty.clone());
+            let handle = self.store.allocate(None, self.dirty.clone());
             self.hooks.push(Hook {
                 kind: Kind::NodeRef,
                 value: Value::NodeRef {
@@ -230,6 +228,34 @@ impl Scope<'_> {
             unreachable!()
         };
         *handle
+    }
+
+    /// Tracks a View's size and position in integer cells. Width and height
+    /// include borders and padding; client sizes exclude borders but include
+    /// padding. Left and top are relative to the parent's layout box and
+    /// exclude scroll offsets.
+    ///
+    /// Returns zeros and `has_measured: false` before attachment and after
+    /// detachment. Metrics reach the frame where the View first lays out:
+    /// commit checks re-render readers before paint, unlike Ink's passive
+    /// `use-box-metrics.ts` effect and layout-listener microtask. An unchanged
+    /// layout schedules nothing.
+    pub fn use_box_metrics(&mut self, node_ref: NodeRef) -> BoxMetrics {
+        let store = self.store.clone();
+        let dirty = self.dirty.clone();
+        let reader = self.use_memo((), move || {
+            let reader = Rc::new(BoxReader {
+                node: Cell::new(node_ref),
+                seen: Cell::new(BoxMetrics::default()),
+                dirty,
+            });
+            store.box_readers.borrow_mut().push(Rc::downgrade(&reader));
+            reader
+        });
+        reader.node.set(node_ref);
+        let metrics = node_ref.box_metrics();
+        reader.seen.set(metrics);
+        metrics
     }
 
     fn position(&mut self, kind: Kind) -> usize {

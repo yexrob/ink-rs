@@ -30,10 +30,36 @@ pub struct ElementMetrics {
     pub client_height: u32,
 }
 
+/// A View's committed layout in integer cells, relative to its parent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BoxMetrics {
+    /// Width including borders and padding.
+    pub width: u32,
+    /// Height including borders and padding.
+    pub height: u32,
+    /// Column relative to the parent's layout box, excluding scroll offsets.
+    pub left: i32,
+    /// Row relative to the parent's layout box, excluding scroll offsets.
+    pub top: i32,
+    /// Width excluding borders, but including padding.
+    pub client_width: u32,
+    /// Height excluding borders, but including padding.
+    pub client_height: u32,
+    /// Whether the tracked View is attached and has committed layout.
+    pub has_measured: bool,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct NodeLayout {
+    pub(crate) metrics: ElementMetrics,
+    pub(crate) left: i32,
+    pub(crate) top: i32,
+}
+
 /// A UI-thread handle to a View's committed layout, created by
 /// [`super::Scope::use_node_ref`]. Equality identifies the owning hook slot.
 #[derive(Clone, Copy)]
-pub struct NodeRef(pub(super) State<ElementMetrics>);
+pub struct NodeRef(pub(super) State<Option<NodeLayout>>);
 
 impl fmt::Debug for NodeRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -55,7 +81,7 @@ impl PartialEq for NodeRef {
 impl Eq for NodeRef {}
 
 impl NodeRef {
-    pub(crate) fn refresh(self, metrics: ElementMetrics) -> bool {
+    pub(crate) fn refresh(self, layout: Option<NodeLayout>) -> bool {
         let Some(value) = self.0.resolve().filter(|value| value.dirty.mounted.get()) else {
             return false;
         };
@@ -63,9 +89,33 @@ impl NodeRef {
         *value
             .value
             .borrow_mut()
-            .downcast_mut::<ElementMetrics>()
-            .expect("node ref type") = metrics;
+            .downcast_mut::<Option<NodeLayout>>()
+            .expect("node ref type") = layout;
         true
+    }
+
+    fn layout(self) -> Option<NodeLayout> {
+        let value = self.0.resolve().filter(|value| value.dirty.mounted.get())?;
+        *value
+            .value
+            .borrow()
+            .downcast_ref::<Option<NodeLayout>>()
+            .expect("node ref type")
+    }
+
+    pub(super) fn box_metrics(self) -> BoxMetrics {
+        let Some(layout) = self.layout() else {
+            return BoxMetrics::default();
+        };
+        BoxMetrics {
+            width: layout.metrics.width,
+            height: layout.metrics.height,
+            left: layout.left,
+            top: layout.top,
+            client_width: layout.metrics.client_width,
+            client_height: layout.metrics.client_height,
+            has_measured: true,
+        }
     }
 }
 
@@ -73,18 +123,15 @@ impl NodeRef {
 /// after detachment, or after the owning component unmounts, returns zeros.
 /// Layout effects see the layout of their commit; reads do not schedule work.
 pub fn measure_element(node_ref: NodeRef) -> ElementMetrics {
-    let Some(value) = node_ref
-        .0
-        .resolve()
-        .filter(|value| value.dirty.mounted.get())
-    else {
-        return ElementMetrics::default();
-    };
-    *value
-        .value
-        .borrow()
-        .downcast_ref::<ElementMetrics>()
-        .expect("node ref type")
+    node_ref
+        .layout()
+        .map_or_else(ElementMetrics::default, |layout| layout.metrics)
+}
+
+pub(super) struct BoxReader {
+    pub(super) node: Cell<NodeRef>,
+    pub(super) seen: Cell<BoxMetrics>,
+    pub(super) dirty: Rc<Dirty>,
 }
 
 thread_local! {
@@ -131,6 +178,7 @@ struct StateValue {
 
 pub(super) struct Store {
     pub(super) focus: RefCell<super::focus::FocusState>,
+    pub(super) box_readers: RefCell<Vec<Weak<BoxReader>>>,
     pub(super) input: RefCell<super::input::InputState>,
     pub(crate) queue: Arc<UpdateQueue>,
     pub(super) window_size: Cell<WindowSize>,
@@ -163,6 +211,7 @@ impl Store {
     pub(super) fn new() -> Rc<Self> {
         let store = Rc::new(Self {
             focus: RefCell::default(),
+            box_readers: RefCell::default(),
             input: RefCell::default(),
             queue: Arc::default(),
             window_size: Cell::new(WindowSize {
@@ -182,6 +231,18 @@ impl Store {
                 .insert(store.id, Rc::downgrade(&store))
         });
         store
+    }
+
+    pub(super) fn check_box_readers(&self) {
+        self.box_readers.borrow_mut().retain(|reader| {
+            let Some(reader) = reader.upgrade().filter(|reader| reader.dirty.mounted.get()) else {
+                return false;
+            };
+            if reader.node.get().box_metrics() != reader.seen.get() {
+                reader.dirty.mark();
+            }
+            true
+        });
     }
 
     pub(super) fn allocate<T: 'static>(&self, value: T, dirty: Rc<Dirty>) -> State<T> {
