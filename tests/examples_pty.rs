@@ -6,6 +6,10 @@ use std::time::Duration;
 
 use ink_rs::{Options, render};
 
+#[cfg(feature = "tokio")]
+#[path = "../examples/jest/app.rs"]
+mod jest;
+
 #[path = "common/pty.rs"]
 mod session;
 #[path = "../examples/suspend-terminal/app.rs"]
@@ -20,11 +24,19 @@ type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 #[derive(Clone, Copy)]
 enum Case {
+    #[cfg(feature = "tokio")]
+    Jest,
     Resize,
     Suspend(&'static str, &'static str),
 }
 
 const CASES: &[(Case, &str, &str)] = &[
+    #[cfg(feature = "tokio")]
+    (
+        Case::Jest,
+        "jest",
+        "Jest example announces completion only after all results",
+    ),
     (
         Case::Resize,
         "resize",
@@ -49,6 +61,18 @@ const CASES: &[(Case, &str, &str)] = &[
 
 fn fixture(case: Case) -> Result {
     let element = match case {
+        #[cfg(feature = "tokio")]
+        Case::Jest => {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_time()
+                .build_local(Default::default())?;
+            runtime.block_on(async {
+                ink_rs::tokio::render(jest::app(), Options::default())
+                    .wait_until_exit()
+                    .await
+            })?;
+            return Ok(());
+        }
         Case::Resize => terminal_resize::app(),
         Case::Suspend(..) => suspend_terminal::app(),
     };
@@ -88,6 +112,8 @@ fn run_pty(case: Case, id: &str) -> Result {
     let mut parser = vt100::Parser::new(24, 100, 0);
     let mut consumed = 0;
     match case {
+        #[cfg(feature = "tokio")]
+        Case::Jest => {}
         Case::Resize => {
             wait_screen(
                 &mut session,
@@ -138,7 +164,51 @@ fn run_pty(case: Case, id: &str) -> Result {
         )
         .into());
     }
+    #[cfg(feature = "tokio")]
+    if matches!(case, Case::Jest) {
+        check_jest_frames(session.output())?;
+    }
     Ok(())
+}
+
+// render.tsx:249. Replay synchronized frames because cell diffs split the text.
+#[cfg(feature = "tokio")]
+fn check_jest_frames(output: &[u8]) -> Result {
+    let mut parser = vt100::Parser::new(24, 100, 1000);
+    let mut total_frame = None;
+    let mut finished_frame = None;
+    let end = b"\x1b[?2026l";
+    let mut remaining = output;
+    let mut frame = 0;
+    while !remaining.is_empty() {
+        let length = remaining
+            .windows(end.len())
+            .position(|bytes| bytes == end)
+            .map_or(remaining.len(), |position| position + end.len());
+        parser.process(&remaining[..length]);
+        remaining = &remaining[length..];
+        parser.screen_mut().set_scrollback(usize::MAX);
+        let history = parser.screen().scrollback();
+        for offset in 0..=history {
+            parser.screen_mut().set_scrollback(offset);
+            let contents = parser.screen().contents();
+            if contents.contains("10 total") {
+                total_frame.get_or_insert(frame);
+            }
+            if contents.contains("Ran all test suites.") {
+                finished_frame.get_or_insert(frame);
+            }
+        }
+        parser.screen_mut().set_scrollback(0);
+        frame += 1;
+    }
+    match (total_frame, finished_frame) {
+        (Some(total), Some(finished)) if total <= finished => Ok(()),
+        _ => Err(format!(
+            "Jest completion order: total={total_frame:?}, finished={finished_frame:?}"
+        )
+        .into()),
+    }
 }
 
 fn main() {

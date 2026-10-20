@@ -205,7 +205,8 @@ Ink 的测试是规格，分四层：
 ### 示例
 
 - `examples/` 移植 Ink 的示例，目录名同 Ink（kebab-case），`cargo run --example use-input` 对应 Ink 的 `npm run example examples/use-input`。文件开头注明移植的 Ink 示例。
-- 有测试的示例用 Cargo 的多文件布局：`main.rs` 放 `main`，`app.rs` 放组件、reducer 和文本逻辑，只用公开 API。`tests/examples.rs` 以 `#[path]` 引入 `app.rs`，在进程内挂载，不开 PTY。没有测试的示例是单个文件，同 `counter.rs`。
+- 有测试的示例用 Cargo 的多文件布局：`main.rs` 放 `main`，`app.rs` 放组件、reducer 和文本逻辑，只用公开 API。`tests/examples.rs` 以 `#[path]` 引入 `app.rs`，在进程内挂载，不开 PTY；需要真实终端的示例（resize、终端交接、进程自然结束）在 `tests/examples_pty.rs` 中运行。没有测试的示例是单个文件，同 `counter.rs`。
+- 依赖 tokio 的示例（jest、subprocess-output）在 `Cargo.toml` 中声明 `required-features = ["tokio"]`，`main` 为 `#[tokio::main(flavor = "local")]`，异步工作放在 `use_future` 中。外部数据经 channel 交给组件：subprocess-output 的 `app` 接收 `UnboundedReceiver<Chunk>`，`main` 从子进程读取，测试直接送入数据块。
 - 周期刷新用 `use_animation`，测试用 `advance` 推进。按 tick 计数的状态由 `frame` 推出；其他状态在以 `frame` 为键的 `use_effect` 中每交付一帧走一步，迟到的唤醒跳过的格点不补走。示例在注释中写明用哪一条。`counter.rs` 保留线程加 `AppHandle` 的写法。
 - `useReducer` 改为 `State<T>` 加 `fn reduce`，`Math.random` 改为本地的 xorshift，faker 改为固定数据。
 - aria、select-input 移植画面，屏幕阅读器部分在 M5。`concurrent-suspense`、`suspense`、`use-transition` 依赖 React 并发，`router` 依赖 React Router，不移植。incremental-rendering 去掉 `incrementalRendering` 选项：ink-rs 在各模式下都按格子差分。

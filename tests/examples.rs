@@ -21,6 +21,10 @@ mod incremental_rendering;
 #[path = "../examples/scroll/app.rs"]
 mod scroll;
 
+#[cfg(feature = "tokio")]
+#[path = "../examples/subprocess-output/app.rs"]
+mod subprocess_output;
+
 #[path = "../examples/table/app.rs"]
 mod table;
 
@@ -67,6 +71,85 @@ fn contains(screen: &Screen, text: &str) -> bool {
 
 fn has_row(screen: &Screen, text: &str) -> bool {
     screen.rows().iter().any(|row| row.trim() == text)
+}
+
+#[cfg(feature = "tokio")]
+async fn subprocess_lines(
+    chunks: impl IntoIterator<Item = subprocess_output::Chunk>,
+) -> Vec<String> {
+    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(
+        subprocess_output::app(receiver),
+        Options {
+            interactive: Some(false),
+            ..Options::default()
+        },
+        &terminal,
+    );
+    for chunk in chunks {
+        sender.send(chunk).unwrap();
+        tokio::task::yield_now().await;
+        app.advance(Duration::ZERO);
+    }
+    drop(sender);
+    tokio::task::yield_now().await;
+    app.advance(Duration::ZERO);
+    app.unmount();
+    subprocess_output::strip_ansi(&terminal.writes().concat())
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+// render.tsx:355. The channel replaces the fixture's stubbed stdout stream.
+#[cfg(feature = "tokio")]
+#[tokio::test(flavor = "local", start_paused = true)]
+async fn subprocess_example_retains_recent_lines_across_chunks() {
+    let chunks = ["one\ntwo\nthree\nfour\nfi", "ve\nsix"]
+        .map(|text| subprocess_output::Chunk::Bytes(text.as_bytes().to_vec()));
+    assert_eq!(
+        subprocess_lines(chunks).await,
+        ["Command output:", "two", "three", "four", "five", "six"]
+    );
+}
+
+// render.tsx:482.
+#[cfg(feature = "tokio")]
+#[tokio::test(flavor = "local", start_paused = true)]
+async fn subprocess_example_strips_ansi_sequences_across_chunks() {
+    let chunks = ["\x1b[3", "1mRed\x1b[0", "m text"]
+        .map(|text| subprocess_output::Chunk::Bytes(text.as_bytes().to_vec()));
+    assert_eq!(
+        subprocess_lines(chunks).await,
+        ["Command output:", "Red text"]
+    );
+}
+
+// render.tsx:508.
+#[cfg(feature = "tokio")]
+#[tokio::test(flavor = "local", start_paused = true)]
+async fn subprocess_example_displays_command_launch_errors() {
+    let chunks = [subprocess_output::Chunk::Failed("spawn npm ENOENT".into())];
+    assert_eq!(
+        subprocess_lines(chunks).await,
+        ["Command output:", "spawn npm ENOENT"]
+    );
+}
+
+// render.tsx:523.
+#[cfg(feature = "tokio")]
+#[tokio::test(flavor = "local", start_paused = true)]
+async fn subprocess_example_decodes_utf8_across_chunks() {
+    let chunks = "\u{d55c}\u{1f642}"
+        .bytes()
+        .map(|byte| subprocess_output::Chunk::Bytes(vec![byte]));
+    assert_eq!(
+        subprocess_lines(chunks).await,
+        ["Command output:", "\u{d55c}\u{1f642}"]
+    );
 }
 
 // render.tsx:271. Screen rows/cursor replace eraseLines and cursorTo byte checks.

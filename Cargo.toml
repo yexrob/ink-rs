@@ -22,6 +22,14 @@ tokio = { version = "1.54", features = ["rt", "sync", "time", "macros", "test-ut
 portable-pty = "0.9"
 vt100 = "0.16"
 
+[[example]]
+name = "jest"
+required-features = ["tokio"]
+
+[[example]]
+name = "subprocess-output"
+required-features = ["tokio"]
+
 [[test]]
 name = "pty"
 harness = false
