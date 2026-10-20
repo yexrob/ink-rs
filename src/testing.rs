@@ -1,5 +1,6 @@
 //! A mounted tree with frame history, driven by calls to [`TestInstance::settle`].
 
+use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -8,7 +9,7 @@ use crate::app::{App, resolve_interactive};
 use crate::paint::{Frame, serialize_row};
 use crate::runtime::{Runtime, WriteDestination};
 use crate::terminal::Terminal;
-use crate::{ColorLevel, Element, Options, OutputStream, RenderOptions};
+use crate::{ColorLevel, Element, Error, Options, OutputStream, RenderOptions};
 
 /// Mounts at 100 columns with basic colors, matching Ink's debug test helper.
 pub fn render(element: impl Into<Element>) -> TestInstance {
@@ -272,6 +273,13 @@ pub struct TestApp {
 }
 
 impl TestApp {
+    /// Returns `None` while running, then the combined exit result.
+    /// Exits come from [`crate::AppHandle`] requests, which the next app step
+    /// honours after passive effects and terminal restoration.
+    pub fn exit_result(&self) -> Option<&Result<Option<Box<dyn Any + Send>>, Error>> {
+        self.app.exit_result()
+    }
+
     /// Reconciles the root and runs a step at the current clock time.
     pub fn rerender(&mut self, element: impl Into<Element>) {
         self.app.rerender(element.into());

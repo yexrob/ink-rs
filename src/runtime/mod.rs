@@ -27,7 +27,7 @@ mod state;
 mod tests;
 
 pub use app_handle::AppHandle;
-pub(crate) use app_handle::{UpdateQueue, Wake};
+pub(crate) use app_handle::{ExitResult, UpdateQueue, Wake};
 pub use hooks::Scope;
 pub(crate) use output::WriteDestination;
 pub use output::{CursorPosition, OutputStream, OutputWriter};

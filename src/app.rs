@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use crate::output::Output;
 use crate::paint::{Cell, Frame, serialize_row};
-use crate::runtime::{Runtime, UpdateQueue, WriteDestination};
+use crate::runtime::{ExitResult, Runtime, UpdateQueue, WriteDestination};
 use crate::terminal::Terminal;
 use crate::{ColorLevel, CursorPosition, Element, OutputStream, RenderOptions, WindowSize};
 
@@ -227,6 +227,8 @@ impl WriteDestination for RefCell<AppOutput> {
 
 pub(crate) struct App {
     runtime: Option<Runtime>,
+    queue: Arc<UpdateQueue>,
+    exit_result: Option<ExitResult>,
     destination: Rc<RefCell<AppOutput>>,
     interactive: bool,
     window: Duration,
@@ -237,7 +239,15 @@ pub(crate) struct App {
 
 impl App {
     pub(crate) fn queue(&self) -> Arc<UpdateQueue> {
-        self.runtime.as_ref().expect("mounted app").queue()
+        self.queue.clone()
+    }
+
+    pub(crate) fn exit_result(&self) -> Option<&ExitResult> {
+        self.exit_result.as_ref()
+    }
+
+    pub(crate) fn take_exit_result(&mut self) -> Option<ExitResult> {
+        self.exit_result.take()
     }
 
     pub(crate) fn terminal_size(&self) -> Option<(u16, u16)> {
@@ -285,7 +295,9 @@ impl App {
         }));
         runtime.set_destination(destination.clone());
         Self {
+            queue: runtime.queue(),
             runtime: Some(runtime),
+            exit_result: None,
             destination,
             interactive,
             window: Duration::from_millis(if options.max_fps == 0 {
@@ -350,6 +362,10 @@ impl App {
             let cursor = runtime.cursor();
             runtime.after_write();
             self.pending |= cursor != runtime.cursor();
+        }
+        if self.queue.has_exit() {
+            self.unmount();
+            return None;
         }
         if runtime.has_work() || runtime.queue().has_pending() {
             Some(now)
@@ -424,6 +440,15 @@ impl App {
         // Ink finishUnmount restores the terminal after React cleanups.
         drop(self.runtime.take());
         self.destination.borrow_mut().restore(final_output);
+        // Keep the request in the queue until it is closed, so cleanup and
+        // worker requests cannot replace the first result during teardown.
+        if let Some(result) = self.queue.take_exit() {
+            let error = self.take_error();
+            self.exit_result = Some(match result {
+                Err(error) => Err(error),
+                Ok(value) => error.map_or(Ok(value), |error| Err(error.into())),
+            });
+        }
     }
 }
 

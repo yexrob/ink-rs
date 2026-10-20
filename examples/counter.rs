@@ -36,6 +36,8 @@ fn counter(cx: &mut Scope, _: &()) -> Element {
         .into()
 }
 
-fn main() -> std::io::Result<()> {
-    render(component(counter, ()), Options::default()).wait_until_exit()
+fn main() -> Result<(), ink_rs::Error> {
+    render(component(counter, ()), Options::default())
+        .wait_until_exit()
+        .map(|_| ())
 }

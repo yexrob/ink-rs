@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::io;
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
@@ -5,7 +6,7 @@ use std::time::Instant;
 use crate::app::{App, resolve_interactive};
 use crate::runtime::{UpdateQueue, Wake};
 use crate::terminal::Terminal;
-use crate::{AppHandle, Element, Options};
+use crate::{AppHandle, Element, Error, Options};
 use process::{ProcessTerminal, Registration};
 
 mod environment;
@@ -79,7 +80,7 @@ impl Instance {
         self.app.render_if_due(Instant::now());
     }
 
-    /// Returns a thread-safe update handle that keeps the event loop alive.
+    /// Returns a thread-safe update and exit handle that keeps the event loop alive.
     pub fn handle(&self) -> AppHandle {
         self.app.queue().handle()
     }
@@ -89,10 +90,17 @@ impl Instance {
         drop(self);
     }
 
-    /// Runs on the calling thread until no work or outside handles remain.
-    /// Returns the first terminal I/O error, including a closed stdout pipe.
+    /// Runs on the calling thread until an exit request or the natural end.
+    ///
+    /// Returns `Ok(None)` for `exit()` or the natural end, `Ok(Some(value))`
+    /// for `exit_with(value)`, and `Err(Error::App(error))` for
+    /// `exit_with_error(error)`. Terminal I/O failures, including a closed
+    /// stdout pipe, return `Err(Error::Io(error))`.
+    ///
+    /// To end a blocked wait from another thread, take an [`Instance::handle`]
+    /// before waiting and call [`AppHandle::exit`] on it.
     /// Termination signals restore the terminal and retain their default effect.
-    pub fn wait_until_exit(mut self) -> io::Result<()> {
+    pub fn wait_until_exit(mut self) -> Result<Option<Box<dyn Any + Send>>, Error> {
         self.registration.as_mut().unwrap().enter_loop();
         let result = run_loop(&mut self.app, &self.receiver);
         self.app.unmount();
@@ -106,8 +114,9 @@ impl Instance {
                     std::thread::park();
                 }
             }
-            Stop::Error(error) => Err(error),
-            Stop::Idle => error.map_or(Ok(()), Err),
+            Stop::Error(error) => Err(error.into()),
+            Stop::Exit => self.app.take_exit_result().expect("exit result"),
+            Stop::Idle => error.map_or(Ok(None), |error| Err(error.into())),
         }
     }
 }
@@ -121,6 +130,7 @@ impl Drop for Instance {
 
 enum Stop {
     Idle,
+    Exit,
     Error(io::Error),
     Signal,
 }
@@ -148,6 +158,9 @@ fn run_loop(app: &mut App, receiver: &mpsc::Receiver<Message>) -> Stop {
         let next = app.render_if_due(Instant::now());
         if let Some(error) = app.take_error() {
             return Stop::Error(error);
+        }
+        if app.exit_result().is_some() {
+            return Stop::Exit;
         }
         if natural_end(next, &queue) {
             return Stop::Idle;

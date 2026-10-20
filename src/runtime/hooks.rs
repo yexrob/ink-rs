@@ -53,8 +53,10 @@ pub struct Scope<'a> {
 }
 
 impl Scope<'_> {
-    /// Returns a thread-safe handle for submitting updates to this app.
+    /// Returns a thread-safe handle for submitting updates and requesting exit.
     /// The hook does not retain a handle; the returned handle keeps the loop alive.
+    /// Exit requests take effect in the next live app step. They have no effect
+    /// in [`crate::testing::render`], which has no live app lifecycle.
     pub fn use_app(&mut self) -> AppHandle {
         self.store.queue.handle()
     }

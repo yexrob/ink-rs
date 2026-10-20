@@ -669,6 +669,70 @@ fn alternate_screen_enters_on_mount_and_exits_on_unmount() {
 }
 
 #[test]
+fn alternate_screen_does_not_replay_exit_error_output_on_the_primary_screen_during_unmount() {
+    fn example(cx: &mut Scope, _: &()) -> Element {
+        let handle = cx.use_app();
+        cx.use_effect((), move || handle.exit_with_error("Done"));
+        Text::new("Done").into()
+    }
+    let terminal = testing::TestTerminal::new(100, 24);
+    let app = testing::mount(
+        component(example, ()),
+        Options {
+            interactive: Some(true),
+            alternate_screen: true,
+            ..Options::default()
+        },
+        &terminal,
+    );
+    let Err(Error::App(error)) = app.exit_result().unwrap() else {
+        panic!("expected an app error");
+    };
+    assert_eq!(error.to_string(), "Done");
+    let writes = terminal.writes();
+    let exit = writes
+        .iter()
+        .rposition(|write| write.contains("\x1b[?1049l"))
+        .expect("should exit the alternate screen on unmount");
+    // Rust returns the error without a JS stack; check the message itself.
+    assert!(
+        writes[exit + 1..]
+            .iter()
+            .all(|write| !strip_ansi(write).contains("Done"))
+    );
+}
+
+#[test]
+fn alternate_screen_does_not_replay_teardown_output_on_the_primary_screen_during_unmount() {
+    fn example(cx: &mut Scope, _: &()) -> Element {
+        let handle = cx.use_app();
+        cx.use_effect((), move || handle.exit_with_error("Done"));
+        Text::new("normal ERROR banner").into()
+    }
+    let terminal = testing::TestTerminal::new(100, 24);
+    let app = testing::mount(
+        component(example, ()),
+        Options {
+            interactive: Some(true),
+            alternate_screen: true,
+            ..Options::default()
+        },
+        &terminal,
+    );
+    let Err(Error::App(error)) = app.exit_result().unwrap() else {
+        panic!("expected an app error");
+    };
+    assert_eq!(error.to_string(), "Done");
+    let writes = terminal.writes();
+    let exit = writes
+        .iter()
+        .rposition(|write| write.contains("\x1b[?1049l"))
+        .expect("should exit the alternate screen on unmount");
+    let replayed = strip_ansi(&writes[exit + 1..].join(""));
+    assert!(!replayed.contains("normal ERROR banner") && !replayed.contains("Done"));
+}
+
+#[test]
 fn alternate_screen_cleanup_exits_the_alternate_screen() {
     let terminal = testing::TestTerminal::new(100, 24);
     let app = testing::mount(

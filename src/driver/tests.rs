@@ -68,3 +68,30 @@ fn render_all_frames_if_ci_environment_variable_equals_false() {
         assert_eq!(output.matches(&format!("#{n}")).count(), 1);
     }
 }
+
+// Native coverage for the loop's exit check; PTY exit tests arrive in M3.
+#[test]
+fn run_loop_exits_while_an_outside_handle_is_retained() {
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = App::new(
+        Text::new("Hello").into(),
+        Options::default(),
+        Box::new(terminal),
+        true,
+        ColorLevel::None,
+    );
+    let (sender, receiver) = mpsc::channel();
+    app.queue().set_wake(Arc::new(sender));
+    app.render_if_due(Instant::now());
+    let handle = app.queue().handle();
+    let worker_handle = handle.clone();
+    let worker = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(20));
+        worker_handle.exit_with("finished");
+    });
+    assert!(matches!(run_loop(&mut app, &receiver), Stop::Exit));
+    let value = app.take_exit_result().unwrap().unwrap().unwrap();
+    assert_eq!(*value.downcast::<&str>().unwrap(), "finished");
+    worker.join().unwrap();
+    drop(handle);
+}

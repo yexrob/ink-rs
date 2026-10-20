@@ -551,6 +551,38 @@ fn unmount_forces_pending_throttled_render() {
 }
 
 #[test]
+fn wait_until_exit_resolves_first_exit_value_when_duplicate_exits_happen_during_teardown() {
+    thread_local! {
+        static HANDLE: Cell<Option<AppHandle>> = const { Cell::new(None) };
+    }
+    struct Cleanup(AppHandle);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            self.0.exit_with("second");
+        }
+    }
+    fn example(cx: &mut Scope, _: &()) -> Element {
+        let handle = cx.use_app();
+        HANDLE.set(Some(handle.clone()));
+        cx.use_effect((), move || {
+            handle.exit_with("first");
+            Cleanup(handle)
+        });
+        Text::new("Hello").into()
+    }
+    let terminal = TestTerminal::new(100, 24);
+    let app = mount(component(example, ()), Options::default(), &terminal);
+    // Rust writes have no Node callback barrier. Exercise a cleanup request
+    // during teardown and an outside request after the exit has completed.
+    HANDLE.take().unwrap().exit_with("second");
+    let result = app.exit_result().unwrap().as_ref().unwrap();
+    assert_eq!(
+        result.as_ref().unwrap().downcast_ref::<&str>(),
+        Some(&"first")
+    );
+}
+
+#[test]
 fn no_bsu_esu_when_output_is_unchanged() {
     let terminal = TestTerminal::new(100, 24);
     let mut app = mount(

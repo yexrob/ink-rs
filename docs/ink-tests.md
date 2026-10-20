@@ -40,7 +40,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `colon-colors.tsx` | 16 | M0 | 16 | `tests/colon_colors.rs` |
 | `colorize.ts` | 16 | M0 | 16 | `tests/colorize.rs` |
 | `component-regressions.tsx` | 4 | M1 | 2 | `tests/component_regressions.rs` |
-| `components.tsx` | 93 | M0 / M1 / M2 | 65 | `tests/components.rs`、`src/driver/tests.rs` |
+| `components.tsx` | 93 | M0 / M1 / M2 / M3 | 67 | `tests/components.rs`、`src/driver/tests.rs` |
 | `content-offset.tsx` | 23 | M0 | 24 | `tests/content_offset.rs` |
 | `cursor-exit-position.tsx` | 6 | M2 | 3 | `tests/cursor_exit_position.rs`、`src/output/tests/cursor_exit_position.rs` |
 | `cursor-helpers.tsx` | 17 | — | 0 | 不适用，cell diff 没有对应内部函数 |
@@ -49,7 +49,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `error-overview.tsx` | 7 | M4 |  |  |
 | `errors.tsx` | 8 | M4 |  |  |
 | `exit-keyboard.tsx` | 7 | M3 |  |  |
-| `exit.tsx` | 15 | M3 |  |  |
+| `exit.tsx` | 15 | M3 | 1 | `tests/exit.rs` |
 | `flex-align-content.tsx` | 13 | M0 / M1 | 11 | `tests/flex_align_content.rs` |
 | `flex-align-items.tsx` | 9 | M0 | 9 | `tests/flex_align_items.rs` |
 | `flex-align-self.tsx` | 9 | M0 | 9 | `tests/flex_align_self.rs` |
@@ -90,7 +90,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `reconciler.tsx` | 14 | M1 | 7 | `tests/reconciler.rs` |
 | `render-callback.tsx` | 4 | — | 0 | 缺 API / 不适用，见下文 |
 | `render-to-string.tsx` | 37 | M0 / M1 | 32 | `tests/render_to_string.rs` |
-| `render.tsx` | 119 | M2 | 31 | `tests/render.rs` |
+| `render.tsx` | 119 | M2 / M3 | 32 | `tests/render.rs` |
 | `rendering-regressions.tsx` | 2 | M0 | 2 | `tests/rendering_regressions.rs` |
 | `rerender-input.tsx` | 4 | M3 |  |  |
 | `sanitize-ansi.ts` | 50 | M0 | 50 | `src/text/sanitize/tests.rs` |
@@ -281,7 +281,6 @@ Ink 有 95 个测试文件、1,646 个测试。
 - M4，错误边界和退出错误处理：`should reject waitUntilExit when app exits during synchronous render error handling`。
 - 不适用，Node 写回调、beforeExit 或测试 helper：`waitUntilExit resolves after stdout write callback`、`createDelayedWriteCallbackStdout delays only the first matching chunk`、`waitUntilExit after unmount does not retain a beforeExit listener`、`issue 596: useEffect can run before the first frame write callback`。
 - 缺 API，本阶段不添加 waitUntilRenderFlush；Terminal 写入没有 Promise 或 Node 写回调：`waitUntilRenderFlush waits for generic stdout write callback`、`waitUntilRenderFlush resolves after stdout write callback`、`waitUntilRenderFlush flushes pending throttled render`、`waitUntilRenderFlush resolves when stdout is not writable`、`waitUntilRenderFlush waits for rerender write callback`、`waitUntilRenderFlush waits for concurrent rerender commit`、`waitUntilRenderFlush waits for all concurrent waiters on the same rerender`、`useApp waitUntilRenderFlush resolves after the first frame write callback`、`useApp waitUntilRenderFlush waits for state update frame flush`、`useApp waitUntilRenderFlush waits for state update queued in same effect tick`、`waitUntilRenderFlush resolves after unmount`、`waitUntilRenderFlush waits for unmount write callback`、`waitUntilRenderFlush after unmount does not register beforeExit listener`、`waitUntilRenderFlush resolves after exit with error`。
-- M3，退出值与卸载重入：`waitUntilExit resolves first exit value when duplicate exits happen during teardown`。
 - 不适用，Node 写回调重入、运行时 debug 或 JS realm：`waitUntilExit resolves first exit value when exit is re-entered during unmount writes`、`waitUntilExit resolves first exit value when exit is re-entered during unmount writes in debug mode`、`waitUntilExit resolves first exit value when exit is re-entered during unmount writes with screen reader`、`exit rejects on cross-realm Error`、`exit with cross-realm Error rejects after stdout write callback`。
 - 不适用，Node ended stdout、JS timer 数量或 Yoga 内存释放：`unmount does not write to ended stdout stream`、`unmount cancels pending throttled log writes when stdout is ended`、`unmount cancels pending throttled render when stdout is ended`、`unmount frees the root Yoga node`。
 
@@ -302,7 +301,6 @@ Ink 有 95 个测试文件、1,646 个测试。
 - 不适用，debug 对应 `testing::render`，没有运行时 debug 选项：`debug mode in CI does not replay final frame during unmount teardown`、`debug mode in CI keeps final newline separation after waitUntilExit`、`alternate screen - debug concurrent teardown restores the cursor before the first commit`。
 - 不适用，design.md 外部输出不捕获 console：`primary screen - cleanup console output follows the native console during unmount`、`alternate screen - cleanup console output follows the native console during unmount`。
 - 不适用，Rust 没有 stdout 到实例的全局映射：`render warns when stdout is reused before unmount`。
-- M3，退出 API：`alternate screen - does not replay exit(Error) output on the primary screen during unmount`、`alternate screen - does not replay teardown output on the primary screen during unmount`。
 - M3，输入和 raw mode：`disable raw mode when all input components are unmounted`、`do not disable raw mode when swapping components that use useInput`、`clear pending input parser state when swapping components that use useInput`、`re-ref stdin when input is used after previous unmount`、`setRawMode() should throw if raw mode is not supported`、`render different component based on whether stdin is a TTY or not`。
 - M5，屏幕阅读器：`unmounting a <Static> ancestor in screen-reader mode does not replay stale output`。
 - 重复，React 并发变体：`text - concurrent`、`multiple text nodes - concurrent`、`wrap text - concurrent`、`truncate text in the end - concurrent`、`transform children - concurrent`、`static output - concurrent`、`remeasure text dimensions on text change - concurrent`、`newline - concurrent`、`horizontal spacer - concurrent`、`vertical spacer - concurrent`、`unmounting a <Static> ancestor in concurrent mode does not crash`。
@@ -348,6 +346,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 - **app 高度上限。** `render.tsx` 的 `growing into an overflowing frame keeps <Static> rows that are still in the viewport - standard` 保留 History、S1–S3 和 `live 2 tick 1` 至 `live 4 tick 1`；顶部被裁掉的 `live 0`、`live 1` 不进入 scrollback。`alternate screen replays <Static> items added while the frame overflows once - standard` 的溢出阶段不输出被裁掉的 Static 行，检查可见屏幕无 Static；收缩后保留原期望 `S1, S2, S3, live 0 tick 3, 空行`。`cursor.tsx` 的 `standard rendering - fullscreen: cursor lands on the requested row on the sync path` 在 5 行终端中裁掉 6 行帧的 `Line 0`，可见 `Line 1!` 至 `Line 5`，声明 `(x=3,y=2)` 落到视口 `(row=1,column=3)`；不清屏，裁掉的行不进 scrollback，代替 Ink 的清屏与 cursorUp 字节断言。这些行为由 design.md 的屏高上限决定。
 - **cursor 与 hooks 的观测边界。** `cursor.tsx` 的 memo、stdout/stderr 写入和满屏更新测试把 hide/show 顺序与 cursorUp + cursorTo 字节改为 vt100 的光标行、列、可见性；memo 的卸载分支保留 hide 存在且 show 不存在的字节断言。`cursor-exit-position.tsx` 的 `done returns the cursor once without erasing output` 改为屏幕内容、光标在帧下方和第二次 done 无字节；备用屏退出检查主屏、光标、可见性，并保留退出序列之后只有 show 的字节断言。`hooks.tsx` 在进程内重建 fixture，将两个流按写入顺序喂给同一个 vt100 屏幕，卸载后添加 `exited`；stdout 的 stripAnsi/换行切分改为屏幕行比较。debug 用例保留数据和重放内容的期望。`render.tsx` 的同步序列用例检查初帧包装，重渲染后无新 write。
 - **app 的观测边界。** 按移植范围，整屏清除次数、按清屏序列切帧的部分改为 vt100 屏幕观测；零整屏清除断言检查 `CSI 2J`、`CSI 3J` 和 `CSI 1;1H` 后的向下擦除均未出现。`render all frames when interactive is explicitly true` 按每帧屏幕验证 Count 0–2，cell diff 不重写 Count 前缀。`side-by-side public components do not rewrite the unchanged left region` 检查左侧区域未重写及屏幕中的计数；不是锁定 Ink 的 CHA + EL。`no throttled renders after unmount` 的卸载消耗 TestApp，没有卸载后的 tick。以上不改变 Ink 的内容期望。
+- **退出的观测边界。** `render.tsx` 的 `waitUntilExit resolves first exit value when duplicate exits happen during teardown` 没有 Node 写回调屏障，改为 effect cleanup 在卸载中请求第二次退出，测试保留的 handle 在退出后再请求一次，结果仍为第一次的值。`exit.tsx` 的 `exit on exit() with error and static output` 不跑 PTY fixture，在进程内用 `testing::mount` 读取退出结果，输出期望不变。`components.tsx` 的两个备用屏退出用例只检查错误消息，Rust 错误没有 JS 调用栈。
 - **log-update 的测试检查屏幕。** 移植版把输出的字节交给 vt100，检查屏幕、scrollback、光标的位置和可见性，以及没有写出字节。Ink 锁定字节的断言（`eraseLines` 的行数、`ESC E` 等）改为检查这些字节产生的屏幕。vt100 在待换行状态下执行 EL 不擦最后一格，xterm 会擦，所以 `full-width updates do not erase after the last character` 还检查字节：满宽的行之后没有 EL。
 - **视口高度代替末尾换行。** Ink 的 log-update 测试为每帧选择是否带末尾换行，ink-rs 由视口高度决定：帧高达到屏高时不带。移植版为每个测试选视口高度，让被断言的帧停在 Ink 的位置。`incremental rendering - no trailing newline: shrink` 从满屏缩短，两帧无法同时对上：缩短后光标按 design.md 停在帧的下一行，Ink 的测试停在帧的最后一行。Ink 的公开 render 退出满屏后，光标也停在帧的下一行。
 - **SGR 字节检查改为完整比较。** Ink 有 16 个测试用 `includes()` 检查 chalk 生成的 SGR 字节，如 `\x1b[41m`。移植版改用 `assert_ansi_eq` 比较完整输出，完整输出取自 Ink 测试运行时的记录。这样检查样式语义，不锁定 SGR 的写法。涉及 `background.tsx` 8 个、`border-backgrounds.tsx` 4 个、`borders.tsx` 1 个、`text.tsx` 3 个。

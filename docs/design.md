@@ -165,6 +165,8 @@ M0 的 API（`src/lib.rs`）：
 - 第一次退出请求生效；开始卸载后的请求，包括清理函数中的调用，被忽略。
 - 退出不在调用内完成。下一步依次：关闭 raw mode，写待绘制帧，运行树清理，恢复终端（关闭粘贴、弹出 kitty flags、显示光标、退出备用屏），最后把结果交给 `wait_until_exit`。
 - `wait_until_exit` 阻塞时，外部经保留的 `AppHandle` 调 `exit()` 结束应用，对应 Ink 测试中的外部 `unmount()`。Ctrl+C 与自然结束的结果为 `Ok(None)`；I/O 错误为 `Err(Error::Io(..))`。
+- 结果在 App 中合并，取第一个失败：退出错误，其次是卸载中的 I/O 错误，最后是退出值。
+- `TestApp::exit_result` 读取合并后的结果。`testing::render` 没有 App，退出请求不生效。
 - 退出错误不改变进程退出码，由应用决定如何报告，同 Ink。
 
 ## 测试
