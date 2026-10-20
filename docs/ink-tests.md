@@ -80,7 +80,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `log-update-sparse.ts` | 9 | M2 | 8 | `src/output/tests/log_update_sparse.rs` |
 | `log-update.tsx` | 52 | M2 | 31 | `src/output/tests/log_update.rs` |
 | `margin.tsx` | 15 | M0 / M1 | 13 | `tests/margin.rs` |
-| `measure-element.tsx` | 13 | M1 |  |  |
+| `measure-element.tsx` | 13 | M1 | 11 | `tests/measure_element.rs` |
 | `measure-text.tsx` | 13 | M0 | 11 | `src/text/measure/tests.rs` |
 | `overflow.tsx` | 44 | M0 | 40 | `tests/overflow.rs` |
 | `overlap-wide-background.tsx` | 7 | M0 | 7 | `tests/overlap_wide_background.rs` |

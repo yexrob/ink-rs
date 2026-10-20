@@ -1,16 +1,23 @@
 use std::fmt;
 use std::rc::Rc;
 
-use crate::{Color, Element, Key, Position, Style, Styled, TextChild, TextWrap};
+use crate::{Color, Element, Key, NodeRef, Position, Style, Styled, TextChild, TextWrap};
 
 /// A flexbox container, Ink's `<Box>`. Style it with the [`Styled`] methods.
 #[derive(Clone, Debug, Default)]
 pub struct View {
+    pub(crate) node_ref: Option<NodeRef>,
     pub(crate) style: Style,
     pub(crate) children: Vec<Element>,
 }
 
 impl View {
+    /// Binds a ref to this View's host node at commit, for [`crate::measure_element`].
+    pub fn node_ref(mut self, node_ref: NodeRef) -> Self {
+        self.node_ref = Some(node_ref);
+        self
+    }
+
     /// Identifies this element among its siblings.
     pub fn key(self, key: impl Into<Key>) -> Element {
         Element::from(self).key(key)

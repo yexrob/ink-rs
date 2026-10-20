@@ -1,10 +1,11 @@
 use std::any::{Any, TypeId, type_name};
 use std::cell::Cell;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::rc::{Rc, Weak};
 use std::time::Instant;
 
-use taffy::NodeId;
+use taffy::{NodeId, Point};
 
 use crate::element::Node;
 use crate::host::{self, HostNode, HostTree, Inline, LineTransform, TextNode};
@@ -23,7 +24,7 @@ mod state;
 mod tests;
 
 pub use hooks::Scope;
-pub use state::State;
+pub use state::{ElementMetrics, NodeRef, State, measure_element};
 
 trait RenderComponent {
     fn render(&self, scope: &mut Scope) -> Element;
@@ -124,6 +125,7 @@ impl Dirty {
 
 #[derive(Default)]
 struct Cleanups {
+    refs: Vec<(NodeId, Option<NodeRef>)>,
     layout: Vec<Box<dyn Any>>,
     passive: Vec<Box<dyn Any>>,
     states: Vec<Box<dyn Any>>,
@@ -139,6 +141,7 @@ struct Instance {
     element: Element,
     children: Vec<Instance>,
     host: Option<NodeId>,
+    node_ref: Option<NodeRef>,
     hooks: Vec<Hook>,
     rendered: bool,
     dirty: Rc<Dirty>,
@@ -152,6 +155,7 @@ impl Instance {
             element,
             children: Vec::new(),
             host: None,
+            node_ref: None,
             hooks: Vec::new(),
             rendered: false,
             dirty: Dirty::new(parent),
@@ -170,10 +174,14 @@ impl Instance {
 
     fn retire(&mut self, cleanups: &mut Cleanups) {
         self.dirty.mounted.set(false);
+        if self.node_ref.take().is_some() {
+            cleanups.refs.push((self.host.expect("ref host"), None));
+        }
         // React commitDeletionEffects visits parents before children. Passive
         // deletion effects and state detachment belong to the post-present phase.
         for hook in self.hooks.drain(..) {
             match hook.value {
+                Value::NodeRef { slot, .. } => drop(slot),
                 Value::State { slot, .. } => cleanups.states.push(Box::new(slot)),
                 Value::Effect(mut effect) => {
                     if let Some(cleanup) = effect.cleanup.take() {
@@ -235,6 +243,8 @@ impl Instance {
 }
 
 pub(crate) struct Runtime {
+    // A BTreeMap iterates live bindings, not a hash table's retained capacity.
+    refs: BTreeMap<usize, NodeRef>,
     tree: HostTree,
     root: NodeId,
     instance: Instance,
@@ -258,6 +268,7 @@ impl Runtime {
         );
         let store = Store::new();
         Self {
+            refs: BTreeMap::new(),
             tree,
             root,
             instance: Instance::new(
@@ -303,6 +314,18 @@ impl Runtime {
                 );
                 order_children(&mut self.tree, self.root, &self.instance.children);
             }
+            // React commitMutationEffects detaches old refs before
+            // commitLayoutEffects attaches refs and runs layout effects.
+            for (node, _) in &self.cleanups.refs {
+                if let Some(node_ref) = self.refs.remove(&usize::from(*node)) {
+                    node_ref.refresh(ElementMetrics::default());
+                }
+            }
+            for (node, node_ref) in self.cleanups.refs.drain(..) {
+                if let Some(node_ref) = node_ref {
+                    self.refs.insert(usize::from(node), node_ref);
+                }
+            }
             self.instance
                 .collect_cleanups(true, &mut self.cleanups.layout);
             drain(&mut self.cleanups.layout);
@@ -310,6 +333,38 @@ impl Runtime {
                 let _guard = RenderGuard::enter();
                 layout::compute(&mut self.tree, self.root);
             }
+            self.refs.retain(|node, node_ref| {
+                let node = NodeId::from(*node);
+                let mut path = Vec::new();
+                let mut current = Some(node);
+                while let Some(ancestor) = current {
+                    path.push(ancestor);
+                    current = self.tree.parent(ancestor);
+                }
+                // Ink measure-element.ts sums ancestor offsets. Keep unrounded
+                // positions for Yoga's extent rounding, as paint's walk does.
+                let mut absolute = Point::ZERO;
+                let mut origin = Point { x: 0, y: 0 };
+                let mut measured = None;
+                for ancestor in path.into_iter().rev() {
+                    let (layout, next_absolute) = layout::get(&self.tree, ancestor, absolute);
+                    absolute = next_absolute;
+                    origin.x += layout.location.x as i32;
+                    origin.y += layout.location.y as i32;
+                    measured = Some(layout);
+                }
+                let layout = measured.expect("bound node has a layout path");
+                node_ref.refresh(ElementMetrics {
+                    x: origin.x,
+                    y: origin.y,
+                    width: layout.size.width as u32,
+                    height: layout.size.height as u32,
+                    client_width: (layout.size.width - layout.border.left - layout.border.right)
+                        as u32,
+                    client_height: (layout.size.height - layout.border.top - layout.border.bottom)
+                        as u32,
+                })
+            });
             self.instance.effects(true);
             if !self.instance.dirty.pending() {
                 break;
@@ -513,6 +568,10 @@ fn reconcile(
     match &node {
         Node::View(view) => {
             update_view(instance, view.style.clone(), false, tree);
+            if instance.node_ref != view.node_ref {
+                instance.node_ref = view.node_ref;
+                cleanups.refs.push((instance.host.unwrap(), view.node_ref));
+            }
             order_children(tree, instance.host.unwrap(), &instance.children);
         }
         Node::Static(value) => {

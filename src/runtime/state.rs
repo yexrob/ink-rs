@@ -1,11 +1,87 @@
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::fmt;
 use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::Dirty;
+
+/// Committed layout in integer cells, relative to the live tree's root.
+/// Coordinates exclude scrolling offsets and terminal viewport placement.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ElementMetrics {
+    /// Zero-based column, including ancestor layout offsets.
+    pub x: i32,
+    /// Zero-based row, including ancestor layout offsets.
+    pub y: i32,
+    /// Width including borders and padding.
+    pub width: u32,
+    /// Height including borders and padding.
+    pub height: u32,
+    /// Width excluding borders, but including padding.
+    pub client_width: u32,
+    /// Height excluding borders, but including padding.
+    pub client_height: u32,
+}
+
+/// A UI-thread handle to a View's committed layout, created by
+/// [`super::Scope::use_node_ref`]. Equality identifies the owning hook slot.
+#[derive(Clone, Copy)]
+pub struct NodeRef(pub(super) State<ElementMetrics>);
+
+impl fmt::Debug for NodeRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NodeRef")
+            .field("runtime", &self.0.runtime)
+            .field("slot", &self.0.slot)
+            .field("generation", &self.0.generation)
+            .finish()
+    }
+}
+
+impl PartialEq for NodeRef {
+    fn eq(&self, other: &Self) -> bool {
+        (self.0.runtime, self.0.slot, self.0.generation)
+            == (other.0.runtime, other.0.slot, other.0.generation)
+    }
+}
+
+impl Eq for NodeRef {}
+
+impl NodeRef {
+    pub(crate) fn refresh(self, metrics: ElementMetrics) -> bool {
+        let Some(value) = self.0.resolve().filter(|value| value.dirty.mounted.get()) else {
+            return false;
+        };
+        // React ref attachment does not schedule an update, unlike state writes.
+        *value
+            .value
+            .borrow_mut()
+            .downcast_mut::<ElementMetrics>()
+            .expect("node ref type") = metrics;
+        true
+    }
+}
+
+/// Reads the latest committed layout, including during render. Before attachment,
+/// after detachment, or after the owning component unmounts, returns zeros.
+/// Layout effects see the layout of their commit; reads do not schedule work.
+pub fn measure_element(node_ref: NodeRef) -> ElementMetrics {
+    let Some(value) = node_ref
+        .0
+        .resolve()
+        .filter(|value| value.dirty.mounted.get())
+    else {
+        return ElementMetrics::default();
+    };
+    *value
+        .value
+        .borrow()
+        .downcast_ref::<ElementMetrics>()
+        .expect("node ref type")
+}
 
 thread_local! {
     static REGISTRY: RefCell<HashMap<u64, Weak<Store>>> = RefCell::new(HashMap::new());

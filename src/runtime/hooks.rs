@@ -2,12 +2,13 @@ use std::any::{Any, TypeId};
 use std::rc::Rc;
 
 use super::Dirty;
-use super::state::{State, StateSlot, Store};
+use super::state::{ElementMetrics, NodeRef, State, StateSlot, Store};
 
 type Setup = Box<dyn FnOnce() -> Box<dyn Any>>;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Kind {
+    NodeRef,
     State(TypeId),
     Memo(TypeId, TypeId),
     Effect(TypeId),
@@ -21,6 +22,10 @@ pub(super) struct Effect {
 }
 
 pub(super) enum Value {
+    NodeRef {
+        handle: NodeRef,
+        slot: StateSlot,
+    },
     State {
         handle: Box<dyn Any>,
         slot: StateSlot,
@@ -44,6 +49,28 @@ pub struct Scope<'a> {
 }
 
 impl Scope<'_> {
+    /// Creates a stable ref to bind with [`crate::View::node_ref`].
+    /// Its metrics remain zero until the bound View commits layout.
+    pub fn use_node_ref(&mut self) -> NodeRef {
+        let position = self.position(Kind::NodeRef);
+        if position == self.hooks.len() {
+            let handle = self
+                .store
+                .allocate(ElementMetrics::default(), self.dirty.clone());
+            self.hooks.push(Hook {
+                kind: Kind::NodeRef,
+                value: Value::NodeRef {
+                    handle: NodeRef(handle),
+                    slot: StateSlot::new(self.store.clone(), handle.slot),
+                },
+            });
+        }
+        let Value::NodeRef { handle, .. } = &self.hooks[position].value else {
+            unreachable!()
+        };
+        *handle
+    }
+
     fn position(&mut self, kind: Kind) -> usize {
         let position = self.cursor;
         self.cursor += 1;
