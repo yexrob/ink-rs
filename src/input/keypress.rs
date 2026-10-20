@@ -326,10 +326,8 @@ fn legacy_function_key(input: &str) -> Option<(String, u32)> {
         ("[", body)
     } else if let Some(body) = body.strip_prefix('O') {
         ("O", body)
-    } else if let Some(body) = body.strip_prefix('N') {
-        ("N", body)
     } else {
-        return None;
+        ("N", body.strip_prefix('N')?)
     };
     let (code, rest) = take_digits(body);
     if !code.is_empty() {
