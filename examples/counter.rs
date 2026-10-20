@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use ink_rs::{Color, Element, Options, Scope, Text, component, render};
+use ink_rs::{Color, Element, Options, Scope, Text, component, render, rsx};
 
 struct Cancel(Arc<AtomicBool>);
 
@@ -31,9 +31,11 @@ fn counter(cx: &mut Scope, _: &()) -> Element {
         });
         Cancel(cancelled)
     });
-    Text::new(format!("{} tests passed", count.get()))
-        .color(Color::Green)
-        .into()
+    let count = count.get();
+    rsx! {
+        Text(color: Color::Green) { "{count} tests passed" }
+    }
+    .into()
 }
 
 fn main() -> Result<(), ink_rs::Error> {

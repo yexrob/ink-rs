@@ -1,7 +1,7 @@
 // Ink examples/scroll.
 
 use ink_rs::{
-    BorderStyle, Element, FlexDirection, Overflow, Scope, Styled, Text, TextWrap, View, component,
+    BorderStyle, Element, FlexDirection, Overflow, Scope, Text, TextWrap, View, component, rsx,
 };
 
 pub fn app() -> Element {
@@ -41,46 +41,52 @@ fn scroll(cx: &mut Scope, _: &()) -> Element {
     let (top, left) = offset.get();
     let (top, left) = (top.min(max_top), left.min(max_left));
     // Natural content height and an explicit width provide both scroll axes.
-    let content_view = View::new()
-        .node_ref(content_ref)
-        .flex_direction(FlexDirection::Column)
-        .flex_shrink(0.0)
-        .width(140)
-        .children((0..40).map(|i| {
-            Text::new(format!(
-                "Line {:02} {}",
-                i + 1,
-                if i % 5 == 0 {
-                    format!(
-                        "\u{25c0} marker {} end-of-line-{} \u{25b6}",
-                        "\u{b7}".repeat(100),
-                        i + 1
-                    )
-                } else {
-                    String::new()
+    let content_view = rsx! {
+        View(
+            node_ref: content_ref,
+            flex_direction: FlexDirection::Column,
+            flex_shrink: 0.0,
+            width: 140,
+        ) {
+            for i in 0..40 {
+                Text(wrap: TextWrap::TruncateEnd, key: i) {
+                    {format!(
+                        "Line {:02} {}",
+                        i + 1,
+                        if i % 5 == 0 {
+                            format!(
+                                "\u{25c0} marker {} end-of-line-{} \u{25b6}",
+                                "\u{b7}".repeat(100),
+                                i + 1
+                            )
+                        } else {
+                            String::new()
+                        }
+                    )}
                 }
-            ))
-            .wrap(TextWrap::TruncateEnd)
-            .key(i)
-        }));
+            }
+        }
+    };
     let status = format!(
         "scrollTop={top}/{max_top} scrollLeft={left}/{max_left} \
          client={}x{} content={}x{} (arrows to scroll, q to quit)",
         viewport.client_width, viewport.client_height, content.width, content.height
     );
-    View::new()
-        .flex_direction(FlexDirection::Column)
-        .child(
-            View::new()
-                .node_ref(viewport_ref)
-                .height(10)
-                .overflow(Overflow::Hidden)
-                .content_offset_y(top as i16)
-                .content_offset_x(left as i16)
-                .flex_direction(FlexDirection::Column)
-                .border_style(BorderStyle::Round)
-                .child(content_view),
-        )
-        .child(Text::new(status).dim_color(true))
-        .into()
+    rsx! {
+        View(flex_direction: FlexDirection::Column) {
+            View(
+                node_ref: viewport_ref,
+                height: 10,
+                overflow: Overflow::Hidden,
+                content_offset_y: top as i16,
+                content_offset_x: left as i16,
+                flex_direction: FlexDirection::Column,
+                border_style: BorderStyle::Round,
+            ) {
+                {content_view}
+            }
+            Text(dim_color: true) { {status} }
+        }
+    }
+    .into()
 }

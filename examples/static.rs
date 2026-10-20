@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use ink_rs::{
-    AnimationOptions, Color, Element, Options, Scope, Static, Styled, Text, View, component, render,
+    AnimationOptions, Color, Element, Options, Scope, Static, Text, View, component, render, rsx,
 };
 
 fn completed(cx: &mut Scope, _: &()) -> Element {
@@ -22,18 +22,14 @@ fn completed(cx: &mut Scope, _: &()) -> Element {
     });
     let tests = tests.get();
     let count = tests.len();
-    Element::fragment::<[Element; 2]>([
-        Static::new(tests, |id, _| {
-            Text::new(format!("\u{2714} Test #{id}"))
-                .color(Color::Green)
-                .key(*id)
+    rsx! {
+        Static(tests, |id, _| rsx! {
+            Text(color: Color::Green, key: *id) { "\u{2714} Test #{id}" }
         })
-        .into(),
-        View::new()
-            .margin_top(1)
-            .child(Text::new(format!("Completed tests: {count}")).dim_color(true))
-            .into(),
-    ])
+        View(margin_top: 1) {
+            Text(dim_color: true) { "Completed tests: {count}" }
+        }
+    }
 }
 
 fn main() -> Result<(), ink_rs::Error> {

@@ -1,6 +1,6 @@
 // Ink examples/justify-content.
 
-use ink_rs::{FlexDirection, JustifyContent, Options, Styled, Text, View, render};
+use ink_rs::{FlexDirection, JustifyContent, Options, Text, View, render, rsx};
 
 fn main() -> Result<(), ink_rs::Error> {
     let modes = [
@@ -11,21 +11,20 @@ fn main() -> Result<(), ink_rs::Error> {
         ("space-between", JustifyContent::SpaceBetween),
         ("space-evenly", JustifyContent::SpaceEvenly),
     ];
-    let app = View::new()
-        .flex_direction(FlexDirection::Column)
-        .children(modes.map(|(name, mode)| {
-            View::new()
-                .child(Text::new("["))
-                .child(
-                    View::new()
-                        .justify_content(mode)
-                        .width(20)
-                        .height(1)
-                        .child(Text::new("X"))
-                        .child(Text::new("Y")),
-                )
-                .child(Text::new(format!("] {name}")))
-        }));
+    let app = rsx! {
+        View(flex_direction: FlexDirection::Column) {
+            for (name, mode) in modes {
+                View {
+                    Text { "[" }
+                    View(justify_content: mode, width: 20, height: 1) {
+                        Text { "X" }
+                        Text { "Y" }
+                    }
+                    Text { "] {name}" }
+                }
+            }
+        }
+    };
     render(app, Options::default())
         .wait_until_exit()
         .map(|_| ())

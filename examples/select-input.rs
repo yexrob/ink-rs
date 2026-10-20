@@ -1,8 +1,6 @@
 // Ink examples/select-input.
 
-use ink_rs::{
-    Color, Element, FlexDirection, Options, Scope, Styled, Text, View, component, render,
-};
+use ink_rs::{Color, Element, FlexDirection, Options, Scope, Text, View, component, render, rsx};
 
 fn select(cx: &mut Scope, _: &()) -> Element {
     let items = ["Red", "Green", "Blue", "Yellow", "Magenta", "Cyan"];
@@ -17,18 +15,23 @@ fn select(cx: &mut Scope, _: &()) -> Element {
             }
         });
     });
+    let items = items
+        .into_iter()
+        .enumerate()
+        .map(|(i, item)| (item, selected.get() == i));
     // The deferred screen-reader mode would add aria list/listitem props and the
     // numbered-input branch.
-    View::new()
-        .flex_direction(FlexDirection::Column)
-        .child(Text::new("Select a color:"))
-        .children(items.into_iter().enumerate().map(|(i, item)| {
-            let active = selected.get() == i;
-            Text::new(format!("{} {item}", if active { ">" } else { " " }))
-                .color(active.then_some(Color::Blue))
-                .key(item)
-        }))
-        .into()
+    rsx! {
+        View(flex_direction: FlexDirection::Column) {
+            Text { "Select a color:" }
+            for (item, active) in items {
+                Text(color: active.then_some(Color::Blue), key: item) {
+                    {format!("{} {item}", if active { ">" } else { " " })}
+                }
+            }
+        }
+    }
+    .into()
 }
 
 fn main() -> Result<(), ink_rs::Error> {

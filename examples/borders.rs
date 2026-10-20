@@ -1,6 +1,6 @@
 // Ink examples/borders.
 
-use ink_rs::{BorderStyle, Element, FlexDirection, Options, Styled, Text, View, render};
+use ink_rs::{BorderStyle, Element, FlexDirection, Options, Text, View, render, rsx};
 
 fn main() -> Result<(), ink_rs::Error> {
     let rows = [
@@ -16,21 +16,20 @@ fn main() -> Result<(), ink_rs::Error> {
             ("classic", BorderStyle::Classic),
         ],
     ];
-    let app: Element = View::new()
-        .flex_direction(FlexDirection::Column)
-        .padding(2)
-        .children(rows.into_iter().enumerate().map(|(i, row)| {
-            let last = row.len() - 1;
-            View::new()
-                .margin_top(i as i16)
-                .children(row.into_iter().enumerate().map(|(i, (label, border))| {
-                    View::new()
-                        .border_style(border)
-                        .margin_right(if i == last { 0 } else { 2 })
-                        .child(Text::new(label))
-                }))
-        }))
-        .into();
+    let app: Element = rsx! {
+        View(flex_direction: FlexDirection::Column, padding: 2) {
+            for (i, row) in rows.iter().enumerate() {
+                View(margin_top: i as i16) {
+                    for (i, &(label, border)) in row.iter().enumerate() {
+                        View(border_style: border, margin_right: if i + 1 == row.len() { 0 } else { 2 }) {
+                            Text { {label} }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    .into();
     render(app, Options::default())
         .wait_until_exit()
         .map(|_| ())

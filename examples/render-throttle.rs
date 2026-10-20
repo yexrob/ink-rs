@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use ink_rs::{
-    AnimationOptions, Element, FlexDirection, Options, Scope, Styled, Text, View, component, render,
+    AnimationOptions, Element, FlexDirection, Options, Scope, Text, View, component, render, rsx,
 };
 
 fn counter(cx: &mut Scope, _: &()) -> Element {
@@ -12,15 +12,14 @@ fn counter(cx: &mut Scope, _: &()) -> Element {
         ..AnimationOptions::default()
     });
     // Count derives from frame, so throttled wakes skip to the elapsed count.
-    View::new()
-        .flex_direction(FlexDirection::Column)
-        .padding(1)
-        .child(Text::new(format!("Counter: {}", tick.frame)))
-        .child(Text::new(
-            "This updates every 10ms but renders are throttled",
-        ))
-        .child(Text::new("Press Ctrl+C to exit"))
-        .into()
+    rsx! {
+        View(flex_direction: FlexDirection::Column, padding: 1) {
+            Text { {format!("Counter: {}", tick.frame)} }
+            Text { "This updates every 10ms but renders are throttled" }
+            Text { "Press Ctrl+C to exit" }
+        }
+    }
+    .into()
 }
 
 fn main() -> Result<(), ink_rs::Error> {

@@ -4,7 +4,7 @@ use std::ffi::OsStr;
 use std::os::unix::process::ExitStatusExt;
 use std::process::{Command, Stdio};
 
-use ink_rs::{BorderStyle, Color, Element, FlexDirection, Scope, Styled, Text, View, component};
+use ink_rs::{BorderStyle, Color, Element, FlexDirection, Scope, Text, View, component, rsx};
 
 fn run_child(command: &str, args: &[&OsStr]) -> Result<(), String> {
     let status = Command::new(command)
@@ -69,23 +69,25 @@ fn example(cx: &mut Scope, _: &()) -> Element {
             });
         }
     });
-    View::new()
-        .flex_direction(FlexDirection::Column)
-        .border_style(BorderStyle::Round)
-        .padding_x(1)
-        .child(Text::new("suspendTerminal() demo").bold(true))
-        .child(
-            Text::new("Counter: ").child(Text::new(counter.get().to_string()).color(Color::Green)),
-        )
-        .child(Text::new(status.get()).dim_color(true))
-        .child(
-            View::new()
-                .margin_top(1)
-                .flex_direction(FlexDirection::Column)
-                .child(Text::new("e \u{2014} open $EDITOR (defaults to vi)"))
-                .child(Text::new("r \u{2014} run a shell read prompt"))
-                .child(Text::new("+ \u{2014} increment the counter"))
-                .child(Text::new("q \u{2014} quit")),
-        )
-        .into()
+    rsx! {
+        View(
+            flex_direction: FlexDirection::Column,
+            border_style: BorderStyle::Round,
+            padding_x: 1,
+        ) {
+            Text(bold: true) { "suspendTerminal() demo" }
+            Text {
+                "Counter: "
+                Text(color: Color::Green) { {counter.get().to_string()} }
+            }
+            Text(dim_color: true) { {status.get()} }
+            View(margin_top: 1, flex_direction: FlexDirection::Column) {
+                Text { "e \u{2014} open $EDITOR (defaults to vi)" }
+                Text { "r \u{2014} run a shell read prompt" }
+                Text { "+ \u{2014} increment the counter" }
+                Text { "q \u{2014} quit" }
+            }
+        }
+    }
+    .into()
 }

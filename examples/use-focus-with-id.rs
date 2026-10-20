@@ -1,8 +1,7 @@
 // Ink examples/use-focus-with-id.
 
 use ink_rs::{
-    Color, Element, FlexDirection, FocusOptions, Options, Scope, Styled, Text, View, component,
-    render,
+    Color, Element, FlexDirection, FocusOptions, Options, Scope, Text, View, component, render, rsx,
 };
 
 fn item(cx: &mut Scope, id: &&'static str) -> Element {
@@ -10,9 +9,19 @@ fn item(cx: &mut Scope, id: &&'static str) -> Element {
         id: Some((*id).into()),
         ..FocusOptions::default()
     });
-    Text::new(format!("Press {id} to focus "))
-        .child(Text::new(if focused { "(focused)" } else { "" }).color(Color::Green))
-        .into()
+    rsx! {
+        Text {
+            "Press {id} to focus "
+            Text(color: Color::Green) {
+                if focused {
+                    "(focused)"
+                } else {
+                    ""
+                }
+            }
+        }
+    }
+    .into()
 }
 
 fn focus(cx: &mut Scope, _: &()) -> Element {
@@ -24,12 +33,17 @@ fn focus(cx: &mut Scope, _: &()) -> Element {
     });
     let instructions =
         "Press Tab to focus next element, Shift+Tab to focus previous element, Esc to reset focus.";
-    View::new()
-        .flex_direction(FlexDirection::Column)
-        .padding(1)
-        .child(View::new().margin_bottom(1).child(Text::new(instructions)))
-        .children(["1", "2", "3"].map(|id| component(item, id)))
-        .into()
+    rsx! {
+        View(flex_direction: FlexDirection::Column, padding: 1) {
+            View(margin_bottom: 1) {
+                Text { {instructions} }
+            }
+            for id in ["1", "2", "3"] {
+                {component(item, id)}
+            }
+        }
+    }
+    .into()
 }
 
 fn main() -> Result<(), ink_rs::Error> {

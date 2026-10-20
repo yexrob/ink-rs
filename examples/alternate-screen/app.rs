@@ -7,8 +7,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use ink_rs::{
-    AnimationOptions, Color, Element, FlexDirection, JustifyContent, Scope, Styled, Text, View,
-    component,
+    AnimationOptions, Color, Element, FlexDirection, JustifyContent, Scope, Text, View, component,
+    rsx,
 };
 
 pub const BOARD_WIDTH: i16 = 20;
@@ -208,45 +208,36 @@ fn snake(cx: &mut Scope, _: &()) -> Element {
         Color::Blue,
         Color::Magenta,
     ];
-    let footer = if game.game_over {
-        Text::new(if game.won { "You Win! " } else { "Game Over! " })
-            .bold(true)
-            .color(Color::Red)
-            .child(Text::new("r: restart | q: quit").dim_color(true))
-    } else {
-        Text::new("Arrow keys: move | Eat \u{1f308} to grow | q: quit").dim_color(true)
-    };
-    View::new()
-        .flex_direction(FlexDirection::Column)
-        .padding_y(1)
-        .child(
-            View::new().justify_content(JustifyContent::Center).child(
-                Text::new("\u{1f984} Unicorn Snake \u{1f984}")
-                    .bold(true)
-                    .color(colors[game.frame % colors.len()]),
-            ),
-        )
-        .child(
-            View::new()
-                .justify_content(JustifyContent::Center)
-                .margin_top(1)
-                .child(
-                    Text::new(format!("Score: {}", game.score))
-                        .bold(true)
-                        .color(Color::Yellow),
-                ),
-        )
-        .child(
-            View::new()
-                .margin_left((columns.saturating_sub(42) / 2) as i16)
-                .margin_top(1)
-                .child(Text::new(board(&game))),
-        )
-        .child(
-            View::new()
-                .justify_content(JustifyContent::Center)
-                .margin_top(1)
-                .child(footer),
-        )
-        .into()
+    rsx! {
+        View(flex_direction: FlexDirection::Column, padding_y: 1) {
+            View(justify_content: JustifyContent::Center) {
+                Text(bold: true, color: colors[game.frame % colors.len()]) {
+                    "\u{1f984} Unicorn Snake \u{1f984}"
+                }
+            }
+            View(justify_content: JustifyContent::Center, margin_top: 1) {
+                Text(bold: true, color: Color::Yellow) { {format!("Score: {}", game.score)} }
+            }
+            View(margin_left: (columns.saturating_sub(42) / 2) as i16, margin_top: 1) {
+                Text { {board(&game)} }
+            }
+            View(justify_content: JustifyContent::Center, margin_top: 1) {
+                if game.game_over {
+                    Text(bold: true, color: Color::Red) {
+                        if game.won {
+                            "You Win! "
+                        } else {
+                            "Game Over! "
+                        }
+                        Text(dim_color: true) { "r: restart | q: quit" }
+                    }
+                } else {
+                    Text(dim_color: true) {
+                        "Arrow keys: move | Eat \u{1f308} to grow | q: quit"
+                    }
+                }
+            }
+        }
+    }
+    .into()
 }

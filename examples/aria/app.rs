@@ -1,6 +1,6 @@
 // Ink examples/aria.
 
-use ink_rs::{Element, FlexDirection, Scope, Styled, Text, View, component};
+use ink_rs::{Element, FlexDirection, Scope, Text, View, component, rsx};
 
 pub fn app() -> Element {
     component(checkbox, ())
@@ -17,18 +17,22 @@ fn checkbox(cx: &mut Scope, _: &()) -> Element {
         This example is best experienced with a screen reader.";
     // The deferred screen-reader mode would add checkbox aria-role/state and
     // aria-hidden on the last Text.
-    View::new()
-        .flex_direction(FlexDirection::Column)
-        .child(Text::new(instructions))
-        .child(View::new().margin_top(1).child(Text::new(if checked.get() {
-            "[x]"
-        } else {
-            "[ ]"
-        })))
-        .child(
-            View::new()
-                .margin_top(1)
-                .child(Text::new("This text is hidden from screen readers.")),
-        )
-        .into()
+    rsx! {
+        View(flex_direction: FlexDirection::Column) {
+            Text { {instructions} }
+            View(margin_top: 1) {
+                Text {
+                    if checked.get() {
+                        "[x]"
+                    } else {
+                        "[ ]"
+                    }
+                }
+            }
+            View(margin_top: 1) {
+                Text { "This text is hidden from screen readers." }
+            }
+        }
+    }
+    .into()
 }

@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use ink_rs::{AnimationOptions, Element, FlexDirection, Scope, Styled, Text, View, component};
+use ink_rs::{AnimationOptions, Element, FlexDirection, Scope, Text, View, component, rsx};
 
 pub fn app() -> Element {
     component(dimensions, ())
@@ -21,16 +21,20 @@ fn dimensions(cx: &mut Scope, _: &()) -> Element {
             writer.write("Hello from Ink to stdout\n");
         }
     });
-    View::new()
-        .flex_direction(FlexDirection::Column)
-        .padding_x(2)
-        .padding_y(1)
-        .child(Text::new("Terminal dimensions:").bold(true).underline(true))
-        .child(
-            View::new()
-                .margin_top(1)
-                .child(Text::new("Width: ").child(Text::new(size.columns.to_string()).bold(true))),
-        )
-        .child(Text::new("Height: ").child(Text::new(size.rows.to_string()).bold(true)))
-        .into()
+    rsx! {
+        View(flex_direction: FlexDirection::Column, padding_x: 2, padding_y: 1) {
+            Text(bold: true, underline: true) { "Terminal dimensions:" }
+            View(margin_top: 1) {
+                Text {
+                    "Width: "
+                    Text(bold: true) { {size.columns.to_string()} }
+                }
+            }
+            Text {
+                "Height: "
+                Text(bold: true) { {size.rows.to_string()} }
+            }
+        }
+    }
+    .into()
 }

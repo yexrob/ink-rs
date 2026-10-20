@@ -1,6 +1,6 @@
 // Ink examples/chat.
 
-use ink_rs::{Element, FlexDirection, Scope, Styled, Text, View, component};
+use ink_rs::{Element, FlexDirection, Scope, Text, View, component, rsx};
 use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Clone, Default)]
@@ -35,21 +35,17 @@ fn chat(cx: &mut Scope, _: &()) -> Element {
         });
     });
     let chat = chat.get();
-    View::new()
-        .flex_direction(FlexDirection::Column)
-        .padding(1)
-        .child(
-            View::new().flex_direction(FlexDirection::Column).children(
-                chat.messages
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, text)| Text::new(text).key(i)),
-            ),
-        )
-        .child(
-            View::new()
-                .margin_top(1)
-                .child(Text::new(format!("Enter your message: {}", chat.input))),
-        )
-        .into()
+    rsx! {
+        View(flex_direction: FlexDirection::Column, padding: 1) {
+            View(flex_direction: FlexDirection::Column) {
+                for (i, text) in chat.messages.into_iter().enumerate() {
+                    Text(key: i) { {text} }
+                }
+            }
+            View(margin_top: 1) {
+                Text { {format!("Enter your message: {}", chat.input)} }
+            }
+        }
+    }
+    .into()
 }

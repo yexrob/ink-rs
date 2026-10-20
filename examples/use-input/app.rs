@@ -1,6 +1,6 @@
 // Ink examples/use-input.
 
-use ink_rs::{Element, FlexDirection, Scope, Styled, Text, View, component};
+use ink_rs::{Element, FlexDirection, Scope, Text, View, component, rsx};
 
 pub fn app() -> Element {
     component(robot, ())
@@ -29,17 +29,13 @@ fn robot(cx: &mut Scope, _: &()) -> Element {
         });
     });
     let (x, y) = position.get();
-    View::new()
-        .flex_direction(FlexDirection::Column)
-        .child(Text::new(
-            "Use arrow keys to move the face. Press 'q' to exit.",
-        ))
-        .child(
-            View::new()
-                .height(12)
-                .padding_left(x)
-                .padding_top(y)
-                .child(Text::new("^_^")),
-        )
-        .into()
+    rsx! {
+        View(flex_direction: FlexDirection::Column) {
+            Text { "Use arrow keys to move the face. Press 'q' to exit." }
+            View(height: 12, padding_left: x, padding_top: y) {
+                Text { "^_^" }
+            }
+        }
+    }
+    .into()
 }

@@ -5,7 +5,7 @@ use std::collections::hash_map::RandomState;
 use std::hash::BuildHasher;
 use std::time::{Duration, Instant};
 
-use ink_rs::{Color, Element, FlexDirection, Scope, Static, Styled, Text, View, component};
+use ink_rs::{Color, Element, FlexDirection, Scope, Static, Text, View, component, rsx};
 
 const PATHS: [&str; 10] = [
     "tests/login.js",
@@ -78,25 +78,24 @@ fn jest(cx: &mut Scope, _: &()) -> Element {
         .count();
     let failed = completed.len() - passed;
     let finished = completed.len() == PATHS.len();
-    let mut view = View::new()
-        .flex_direction(FlexDirection::Column)
-        .child(Static::new(completed, |result, _| {
-            test(result).key(result.path)
-        }));
-    if !running.is_empty() {
-        view = view.child(
-            View::new()
-                .flex_direction(FlexDirection::Column)
-                .margin_top(1)
-                .children(running.iter().map(|result| test(result).key(result.path))),
-        );
+    rsx! {
+        View(flex_direction: FlexDirection::Column) {
+            Static(completed, |result, _| test(result).key(result.path))
+            if !running.is_empty() {
+                View(flex_direction: FlexDirection::Column, margin_top: 1) {
+                    for result in &running {
+                        {test(result).key(result.path)}
+                    }
+                }
+            }
+            {summary(
+                finished,
+                passed,
+                failed,
+                short_time(start_time.get().elapsed()),
+            )}
+        }
     }
-    view.child(summary(
-        finished,
-        passed,
-        failed,
-        short_time(start_time.get().elapsed()),
-    ))
     .into()
 }
 
@@ -116,38 +115,34 @@ fn short_time(elapsed: Duration) -> String {
 }
 
 fn summary(finished: bool, passed: usize, failed: usize, time: String) -> Element {
-    let mut suites = View::new().child(
-        View::new()
-            .width(14)
-            .child(Text::new("Test Suites:").bold(true)),
-    );
-    if failed > 0 {
-        suites = suites.child(
-            Text::new(format!("{failed} failed, "))
-                .bold(true)
-                .color(Color::Red),
-        );
+    rsx! {
+        View(flex_direction: FlexDirection::Column, margin_top: 1) {
+            View {
+                View(width: 14) {
+                    Text(bold: true) { "Test Suites:" }
+                }
+                if failed > 0 {
+                    Text(bold: true, color: Color::Red) { "{failed} failed, " }
+                }
+                if passed > 0 {
+                    Text(bold: true, color: Color::Green) { "{passed} passed, " }
+                }
+                Text { {format!("{} total", passed + failed)} }
+            }
+            View {
+                View(width: 14) {
+                    Text(bold: true) { "Time:" }
+                }
+                Text { {time} }
+            }
+            if finished {
+                View {
+                    Text(dim_color: true) { "Ran all test suites." }
+                }
+            }
+        }
     }
-    if passed > 0 {
-        suites = suites.child(
-            Text::new(format!("{passed} passed, "))
-                .bold(true)
-                .color(Color::Green),
-        );
-    }
-    let mut view = View::new()
-        .flex_direction(FlexDirection::Column)
-        .margin_top(1)
-        .child(suites.child(Text::new(format!("{} total", passed + failed))))
-        .child(
-            View::new()
-                .child(View::new().width(14).child(Text::new("Time:").bold(true)))
-                .child(Text::new(time)),
-        );
-    if finished {
-        view = view.child(View::new().child(Text::new("Ran all test suites.").dim_color(true)));
-    }
-    view.into()
+    .into()
 }
 
 fn test(result: &TestResult) -> Element {
@@ -158,17 +153,16 @@ fn test(result: &TestResult) -> Element {
         _ => unreachable!("test status"),
     };
     let (directory, filename) = result.path.split_once('/').expect("test path");
-    View::new()
-        .child(
-            Text::new(format!(" {} ", result.status.to_uppercase()))
-                .color(Color::Black)
-                .background_color(background),
-        )
-        .child(
-            View::new()
-                .margin_left(1)
-                .child(Text::new(format!("{directory}/")).dim_color(true))
-                .child(Text::new(filename).bold(true).color(Color::White)),
-        )
-        .into()
+    rsx! {
+        View {
+            Text(color: Color::Black, background_color: background) {
+                {format!(" {} ", result.status.to_uppercase())}
+            }
+            View(margin_left: 1) {
+                Text(dim_color: true) { "{directory}/" }
+                Text(bold: true, color: Color::White) { {filename} }
+            }
+        }
+    }
+    .into()
 }

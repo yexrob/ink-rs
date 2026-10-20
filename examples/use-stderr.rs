@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use ink_rs::{AnimationOptions, Element, Options, Scope, Text, component, render};
+use ink_rs::{AnimationOptions, Element, Options, Scope, Text, component, render, rsx};
 
 fn example(cx: &mut Scope, _: &()) -> Element {
     let writer = cx.use_stderr();
@@ -16,7 +16,10 @@ fn example(cx: &mut Scope, _: &()) -> Element {
             writer.write("Hello from Ink to stderr\n");
         }
     });
-    Text::new("Hello World").into()
+    rsx! {
+        Text { "Hello World" }
+    }
+    .into()
 }
 
 fn main() -> Result<(), ink_rs::Error> {

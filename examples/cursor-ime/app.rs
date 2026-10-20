@@ -1,8 +1,7 @@
 // Ink examples/cursor-ime: use the renderer's widths to anchor the IME.
 
 use ink_rs::{
-    CursorPosition, Element, FlexDirection, Scope, Styled, Text, TextWrap, View, component,
-    text_width,
+    CursorPosition, Element, FlexDirection, Scope, Text, TextWrap, View, component, rsx, text_width,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -45,10 +44,12 @@ fn editor(cx: &mut Scope, _: &()) -> Element {
     }
     cursor.x = cursor.x.saturating_sub(1);
     cx.use_cursor(Some(cursor));
-    View::new()
-        .flex_direction(FlexDirection::Column)
-        .child(Text::new(heading).wrap(TextWrap::Hard))
-        // Reserve the cursor cell in layout as well as in the calculation.
-        .child(Text::new(format!("{prompt} ")).wrap(TextWrap::Hard))
-        .into()
+    rsx! {
+        View(flex_direction: FlexDirection::Column) {
+            Text(wrap: TextWrap::Hard) { {heading} }
+            // Reserve the cursor cell in layout as well as in the calculation.
+            Text(wrap: TextWrap::Hard) { "{prompt} " }
+        }
+    }
+    .into()
 }

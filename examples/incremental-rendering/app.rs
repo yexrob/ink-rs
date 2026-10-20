@@ -7,8 +7,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use ink_rs::{
-    AnimationOptions, BorderStyle, Color, Element, FlexDirection, Scope, Styled, Text, TextWrap,
-    View, component,
+    AnimationOptions, BorderStyle, Color, Element, FlexDirection, Scope, Text, TextWrap, View,
+    component, rsx,
 };
 
 const SERVICES: [&str; 30] = [
@@ -141,125 +141,108 @@ fn monitor(cx: &mut Scope, _: &()) -> Element {
     // Derive the resize clamp; writing State in render is not allowed.
     let selected = selected.get().min(service_count - 1);
     // ink-rs diffs cells in every mode, so there is no incrementalRendering flag.
-    let mut header = View::new()
-        .flex_direction(FlexDirection::Column)
-        .child(
-            Text::new("Incremental Rendering Demo - cell diff")
-                .bold(true)
-                .color(Color::Cyan),
-        )
-        .child(
-            Text::new(format!(
-                "Use up/down arrows to navigate | Press q to quit | FPS: {:.0}",
-                if fast.delta.is_zero() {
-                    0.0
-                } else {
-                    1.0 / fast.delta.as_secs_f64()
-                }
-            ))
-            .dim_color(true),
-        )
-        .child(Text::new(format!(
-            "Time: {}s | Updates: {} | Random: {}",
-            seconds.frame,
-            seconds.frame,
-            noise.get()
-        )));
-    for (index, color) in [Color::Green, Color::Yellow, Color::Red]
+    let fps = if fast.delta.is_zero() {
+        0.0
+    } else {
+        1.0 / fast.delta.as_secs_f64()
+    };
+    let progress_bars = [Color::Green, Color::Yellow, Color::Red]
         .into_iter()
         .enumerate()
-    {
-        let progress = (fast.frame * (index as u64 + 1) % 101) as usize;
-        header = header.child(
-            Text::new(format!("Progress {}: ", index + 1))
-                .child(
-                    Text::new(format!(
-                        "{}{}",
-                        "\u{2588}".repeat(progress / 5),
-                        "\u{2591}".repeat(20 - progress / 5)
-                    ))
-                    .color(color),
-                )
-                .child(format!(" {progress}%")),
-        );
-    }
+        .map(|(index, color)| {
+            let progress = (fast.frame * (index as u64 + 1) % 101) as usize;
+            (index, color, progress)
+        });
+    let header = rsx! {
+        View(flex_direction: FlexDirection::Column) {
+            Text(bold: true, color: Color::Cyan) {
+                "Incremental Rendering Demo - cell diff"
+            }
+            Text(dim_color: true) {
+                "Use up/down arrows to navigate | Press q to quit | FPS: {fps:.0}"
+            }
+            Text {
+                {format!(
+                    "Time: {}s | Updates: {} | Random: {}",
+                    seconds.frame,
+                    seconds.frame,
+                    noise.get()
+                )}
+            }
+            for (index, color, progress) in progress_bars {
+                Text {
+                    {format!("Progress {}: ", index + 1)}
+                    Text(color: color) {
+                        {format!(
+                            "{}{}",
+                            "\u{2588}".repeat(progress / 5),
+                            "\u{2591}".repeat(20 - progress / 5)
+                        )}
+                    }
+                    " {progress}%"
+                }
+            }
+        }
+    };
     // Truncate the long service/log rows to keep both panels and selection visible.
-    View::new()
-        .flex_direction(FlexDirection::Column)
-        .child(
-            View::new()
-                .border_style(BorderStyle::Round)
-                .border_color(Color::Cyan)
-                .padding_x(2)
-                .padding_y(1)
-                .child(header),
-        )
-        .child(
-            View::new()
-                .flex_direction(FlexDirection::Column)
-                .border_style(BorderStyle::Single)
-                .border_color(Color::Yellow)
-                .padding_x(2)
-                .padding_y(1)
-                .margin_top(1)
-                .child(
-                    Text::new("Live Logs (one line updates per frame):")
-                        .bold(true)
-                        .color(Color::Yellow),
-                )
-                .children(logs.get().into_iter().enumerate().map(|(i, line)| {
-                    Text::new(line)
-                        .wrap(TextWrap::TruncateEnd)
-                        .color(Color::Green)
-                        .key(i)
-                })),
-        )
-        .child(
-            View::new()
-                .flex_direction(FlexDirection::Column)
-                .border_style(BorderStyle::Single)
-                .border_color(Color::Gray)
-                .padding_x(2)
-                .padding_y(1)
-                .margin_top(1)
-                .child(
-                    Text::new(format!(
-                        "System Services Monitor ({service_count} of 30 services):"
-                    ))
-                    .bold(true)
-                    .color(Color::Magenta),
-                )
-                .children(
-                    SERVICES[..service_count]
-                        .iter()
-                        .enumerate()
-                        .map(|(i, row)| {
-                            Text::new(format!("{} {row}", if i == selected { ">" } else { " " }))
-                                .wrap(TextWrap::TruncateEnd)
-                                .color(if i == selected {
-                                    Color::Blue
-                                } else {
-                                    Color::White
-                                })
-                                .key(i)
-                        }),
-                ),
-        )
-        .child(
-            View::new()
-                .border_style(BorderStyle::Round)
-                .border_color(Color::Magenta)
-                .padding_x(2)
-                .margin_top(1)
-                .child(
-                    Text::new("Selected: ")
-                        .child(
-                            Text::new(SERVICES[selected])
-                                .bold(true)
-                                .color(Color::Magenta),
-                        )
-                        .wrap(TextWrap::TruncateEnd),
-                ),
-        )
-        .into()
+    rsx! {
+        View(flex_direction: FlexDirection::Column) {
+            View(
+                border_style: BorderStyle::Round,
+                border_color: Color::Cyan,
+                padding_x: 2,
+                padding_y: 1,
+            ) {
+                {header}
+            }
+            View(
+                flex_direction: FlexDirection::Column,
+                border_style: BorderStyle::Single,
+                border_color: Color::Yellow,
+                padding_x: 2,
+                padding_y: 1,
+                margin_top: 1,
+            ) {
+                Text(bold: true, color: Color::Yellow) {
+                    "Live Logs (one line updates per frame):"
+                }
+                for (i, line) in logs.get().into_iter().enumerate() {
+                    Text(wrap: TextWrap::TruncateEnd, color: Color::Green, key: i) { {line} }
+                }
+            }
+            View(
+                flex_direction: FlexDirection::Column,
+                border_style: BorderStyle::Single,
+                border_color: Color::Gray,
+                padding_x: 2,
+                padding_y: 1,
+                margin_top: 1,
+            ) {
+                Text(bold: true, color: Color::Magenta) {
+                    "System Services Monitor ({service_count} of 30 services):"
+                }
+                for (i, row) in SERVICES[..service_count].iter().enumerate() {
+                    Text(
+                        wrap: TextWrap::TruncateEnd,
+                        color: if i == selected { Color::Blue } else { Color::White },
+                        key: i,
+                    ) {
+                        {format!("{} {row}", if i == selected { ">" } else { " " })}
+                    }
+                }
+            }
+            View(
+                border_style: BorderStyle::Round,
+                border_color: Color::Magenta,
+                padding_x: 2,
+                margin_top: 1,
+            ) {
+                Text(wrap: TextWrap::TruncateEnd) {
+                    "Selected: "
+                    Text(bold: true, color: Color::Magenta) { {SERVICES[selected]} }
+                }
+            }
+        }
+    }
+    .into()
 }

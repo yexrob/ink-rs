@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use ink_rs::{Element, FlexDirection, Scope, Styled, Text, View, component};
+use ink_rs::{Element, FlexDirection, Scope, Text, View, component, rsx};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 pub enum Chunk {
@@ -83,16 +83,15 @@ fn subprocess_output(cx: &mut Scope, source: &Source) -> Element {
         }
         output.update(Output::finish);
     });
-    View::new()
-        .flex_direction(FlexDirection::Column)
-        .padding(1)
-        .child(Text::new("Command output:"))
-        .child(
-            View::new()
-                .margin_top(1)
-                .child(Text::new(strip_ansi(&output.get().text))),
-        )
-        .into()
+    rsx! {
+        View(flex_direction: FlexDirection::Column, padding: 1) {
+            Text { "Command output:" }
+            View(margin_top: 1) {
+                Text { {strip_ansi(&output.get().text)} }
+            }
+        }
+    }
+    .into()
 }
 
 /// Removes CSI, OSC and two-byte escape sequences. An unfinished sequence at

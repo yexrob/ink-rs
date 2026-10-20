@@ -40,17 +40,114 @@ portable-pty = "0.9"
 vt100 = "0.16"
 
 [[example]]
+name = "alternate-screen"
+required-features = ["macros"]
+
+[[example]]
+name = "aria"
+required-features = ["macros"]
+
+[[example]]
+name = "border-backgrounds"
+required-features = ["macros"]
+
+[[example]]
+name = "borders"
+required-features = ["macros"]
+
+[[example]]
+name = "box-backgrounds"
+required-features = ["macros"]
+
+[[example]]
+name = "chat"
+required-features = ["macros"]
+
+[[example]]
+name = "counter"
+required-features = ["macros"]
+
+[[example]]
+name = "cursor-ime"
+required-features = ["macros"]
+
+[[example]]
+name = "incremental-rendering"
+required-features = ["macros"]
+
+[[example]]
 name = "jest"
-required-features = ["tokio"]
+required-features = ["tokio", "macros"]
+
+[[example]]
+name = "justify-content"
+required-features = ["macros"]
+
+[[example]]
+name = "render-throttle"
+required-features = ["macros"]
+
+[[example]]
+name = "scroll"
+required-features = ["macros"]
+
+[[example]]
+name = "select-input"
+required-features = ["macros"]
+
+[[example]]
+name = "static"
+required-features = ["macros"]
 
 [[example]]
 name = "subprocess-output"
-required-features = ["tokio"]
+required-features = ["tokio", "macros"]
+
+[[example]]
+name = "suspend-terminal"
+required-features = ["macros"]
+
+[[example]]
+name = "table"
+required-features = ["macros"]
+
+[[example]]
+name = "terminal-resize"
+required-features = ["macros"]
+
+[[example]]
+name = "use-animation"
+required-features = ["macros"]
+
+[[example]]
+name = "use-focus"
+required-features = ["macros"]
+
+[[example]]
+name = "use-focus-with-id"
+required-features = ["macros"]
+
+[[example]]
+name = "use-input"
+required-features = ["macros"]
+
+[[example]]
+name = "use-stderr"
+required-features = ["macros"]
+
+[[example]]
+name = "use-stdout"
+required-features = ["macros"]
 
 [[test]]
 name = "pty"
 harness = false
 
 [[test]]
+name = "examples"
+required-features = ["macros"]
+
+[[test]]
 name = "examples_pty"
 harness = false
+required-features = ["macros"]
