@@ -7,7 +7,7 @@
 Ink 有 95 个测试文件、1,646 个测试。
 
 - **M0**：40 个文件、755 个测试。移植 617 个，写成 621 个 `#[test]`（`content-offset.tsx` 的一个参数化测试按参数拆成 5 个），上游跳过的 4 个中，3 个标 `#[ignore]`，1 个在 taffy 下通过。未移植 138 个，原因见下表，明细见[下文](#m0-文件中未移植的测试)。
-- **其他 55 个文件**（891 个测试）：50 个随 M1–M5 移植，5 个不适用。M1 文件中不移植的测试见[下文](#m1-文件中不移植的测试)。
+- **其他 55 个文件**（891 个测试）：49 个随 M1–M5 移植，6 个不适用。M1 文件中不移植的测试见[下文](#m1-文件中不移植的测试)。
 
 | 未移植原因 | 数量 | 处理 |
 |---|---:|---|
@@ -72,7 +72,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `is-devtools-reachable.tsx` | 3 | — |  |  |
 | `issue-973-static-commit.tsx` | 1 | M2 | 1 | `tests/issue_973_static_commit.rs` |
 | `kitty-keyboard.tsx` | 77 | M3 | 74 | `src/input/keypress/tests/kitty_keyboard.rs`、`tests/kitty_keyboard.rs` |
-| `kitty-negotiation.tsx` | 5 | M3 / M4 | 3 | `tests/kitty_negotiation.rs` |
+| `kitty-negotiation.tsx` | 5 | M3 / M4 | 5 | `tests/kitty_negotiation.rs` |
 | `line-update.ts` | 29 | — | 0 | 不适用，cell diff 没有对应内部函数 |
 | `log-update-blank-growth.ts` | 4 | M2 | 4 | `src/output/tests/log_update_blank_growth.rs` |
 | `log-update-columns.tsx` | 8 | M2 | 3 | `src/output/tests/log_update_columns.rs` |
@@ -104,12 +104,12 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `style-update-consistency.tsx` | 15 | M1 | 15 | `tests/style_update_consistency.rs` |
 | `styled-combining-marks.tsx` | 9 | M0 | 9 | `tests/styled_combining_marks.rs` |
 | `styles.ts` | 17 | — |  |  |
-| `suspend-terminal.tsx` | 14 | M4 |  |  |
-| `suspension-exit.tsx` | 2 | M4 |  |  |
-| `suspension-handle.tsx` | 2 | M4 |  |  |
-| `suspension-input-disable.tsx` | 7 | M4 |  |  |
-| `suspension-output.tsx` | 3 | M4 |  |  |
-| `suspension-resize.tsx` | 2 | M4 |  |  |
+| `suspend-terminal.tsx` | 14 | M4 | 9 | `tests/suspend_terminal.rs`、`tests/pty.rs` |
+| `suspension-exit.tsx` | 2 | M4 | 2 | `tests/suspension_exit.rs` |
+| `suspension-handle.tsx` | 2 | — |  |  |
+| `suspension-input-disable.tsx` | 7 | M4 | 7 | `tests/suspension_input_disable.rs` |
+| `suspension-output.tsx` | 3 | M4 | 3 | `tests/suspension_output.rs` |
+| `suspension-resize.tsx` | 2 | M4 | 2 | `tests/suspension_resize.rs` |
 | `terminal-resize.tsx` | 28 | M2 | 15 | `tests/terminal_resize.rs` |
 | `text-controls.tsx` | 24 | M0 | 24 | `tests/text_controls.rs`, `src/text/sanitize/tests.rs` |
 | `text-width.tsx` | 18 | M0 | 18 | `tests/text_width.rs` |
@@ -328,7 +328,6 @@ Ink 有 95 个测试文件、1,646 个测试。
   - 重复：`kitty protocol - Ctrl letters retain their unshifted key code` 与 `kitty protocol - ctrl modifier` 输入相同，断言是后者的子集。
   - 不适用：`kitty protocol - preserves sequence and raw`。ink-rs 的 `ParsedKey` 不保留 `raw`，`sequence` 不经 `use_input` 交给用户。
   - 不适用：`kitty protocol - auto detection handles Uint8Array query response`。ink-rs 的输入总是字节切片，没有字符串与 `Uint8Array` 两条路径。
-- `kitty-negotiation.tsx`：M4，挂起：`suspension cancels pending keyboard negotiation`、`unmount while suspended does not pop the primary keyboard stack`。
 - `hooks-use-input.tsx`：
   - 不适用，React transition 与 discrete 优先级：`useInput - discrete priority keeps states in sync with useTransition during rapid input`。
   - 重复：`useInput - handle remove (delete)` 与 `useInput - handle delete` 输入相同，fixture 条件相同。
@@ -351,6 +350,12 @@ Ink 有 95 个测试文件、1,646 个测试。
   - 不适用，Node EventEmitter；unmount 消耗 app：`removes resize listener on unmount`、`does not crash when resize fires after unmount`。
   - 并发：`tracks a box mounted by child state - concurrent=true`。
 - `errors.tsx`：不适用，Node 的 unhandledRejection 与 JS realm：`does not emit unhandledRejection when render exits with an error and waitUntilExit is unused`、`waitUntilExit preserves a component error from another realm`。
+- `suspend-terminal.tsx`：
+  - 重复：`suspendTerminal disposable resumes via Symbol.asyncDispose` 与 `suspendTerminal returns a disposable that resumes on resume()` 相同；`suspendTerminal shows <Static> output once after resume re-enters the alternate screen - incremental` 与 standard 相同。
+  - M5，屏幕阅读器：`suspendTerminal shows <Static> output once after resume re-enters the alternate screen - screen reader`。
+  - 不适用，没有 debug 模式：`suspendTerminal shows <Static> output once after resume re-enters the alternate screen - debug`。
+  - 不适用，Terminal 操作不抛错，I/O 错误结束应用：`suspendTerminal rolls back so a later suspend works if handover throws`。
+- `suspension-handle.tsx`：不适用，没有挂起句柄对象：`an old suspension cannot resume a later suspension (dispose first: false)`、`an old suspension cannot resume a later suspension (dispose first: true)`。
 - `error-overview.tsx`：不适用，React 的 key 警告：`does not emit duplicate key warnings for repeated stack lines`。错误界面是 View/Text 数据树，没有 key。
 
 ## 缺 API
@@ -370,6 +375,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 - **焦点的观测边界。** `focus*.tsx` 读 stdout spy 的断言改为 `testing::render` 的 `last_frame()`，期望文本不变。`undefined` 改为 `None`，空 ID 为 `Some("")`。`delay`、`act`、`waitUntilRenderFlush` 改为步进或 `settle`；单独 Esc 后的 50ms 等待改为 `advance(20ms)`。在 render 中读取 `activeId` 的用例保留 render 读取；捕获 manager 的用例在步进后读 `active_id()`。`focus.tsx` 移植 44 个用例：Ink 用表循环生成的 16 个 kitty 修饰键用例在 Rust 中是一个表测试，失败信息保留 Ink 用例名，共 29 个 `#[test]`。React 条件渲染的 `null` 改为空 fragment，保留子节点位置。
 - **退出的观测边界。** `render.tsx` 的 `waitUntilExit resolves first exit value when duplicate exits happen during teardown` 没有 Node 写回调屏障，改为 effect cleanup 在卸载中请求第二次退出，测试保留的 handle 在退出后再请求一次，结果仍为第一次的值。`exit.tsx` 的 `exit on exit() with error and static output` 不跑 PTY fixture，在进程内用 `testing::mount` 读取退出结果，输出期望不变。`components.tsx` 的两个备用屏退出用例只检查错误消息，Rust 错误没有 JS 调用栈。
 - **进程的观测边界。** `exit.tsx` 的 11 个进程用例、`hooks.tsx` 的 ``useInput - handle Ctrl+C when `exitOnCtrlC` is `false` `` 与 `render.tsx` 的 `#725: non-TTY child process output is flushed`、两个 `useAnimation can drive … non-interactive process exit` 在 `tests/pty.rs` 中重建 fixture；后三个走管道，不开 PTY。Node 定时器改为线程加 `AppHandle`；外部 `unmount()` 改为 `Instance::handle().exit()`，`wait_until_exit` 消耗 `Instance`。`exit when app finishes execution` 的 fixture 调用 `wait_until_exit` 驱动更新。`#725` 没有 `use_stdin`，fixture 渲染固定文本，代替 stdin 是否为 TTY 的输出。`exit on exit() with raw mode` 另检查退出后的 termios 与开启前相同。macOS 在 `ICANON` 切换后置 `PENDIN`，检查前用零超时的 poll 让内核处理，不读取输入、不屏蔽标志。`src/driver/tests.rs` 与 `src/driver/stdin.rs` 另有 4 个原生测试，覆盖 Ink fixture 不涉及的规则：相邻输入合并且不越过其他消息、EOF 后在更新完成时自然结束、输入交给最后的持有者并在其释放后交给前一个、读错误进入首个错误槽。
+- **挂起的观测边界。** `suspend-terminal.tsx` 的回调用例在 effect 中调用 `suspend_terminal`。回调要求 `Send`，不能捕获 `Rc` 的 TestTerminal，改为检查 `raw_mode_calls()` 为 `[true, false, true]`。返回句柄的用例改用 `TestApp::suspend_terminal` 与 `resume_terminal`。回调抛错的用例改为 panic 向上展开，检查 raw mode 停在关闭、光标已显示。Static 用例从最后一次 `CSI ?1049h` 起交给 vt100 比较屏幕。子进程用例在 `tests/pty.rs` 中重建 fixture：回调写出 `CHILD_OUTPUT`，线程 100ms 后请求退出。`suspension-exit.tsx` 的 `unmount` 消耗 TestApp，没有卸载后的 resume。`src/app/tests.rs` 另有 2 个 Ctrl+Z 原生测试，`tests/pty.rs` 另有 bash 作业控制与会话首进程组 2 个 PTY 用例，不计入移植数。
 - **log-update 的测试检查屏幕。** 移植版把输出的字节交给 vt100，检查屏幕、scrollback、光标的位置和可见性，以及没有写出字节。Ink 锁定字节的断言（`eraseLines` 的行数、`ESC E` 等）改为检查这些字节产生的屏幕。vt100 在待换行状态下执行 EL 不擦最后一格，xterm 会擦，所以 `full-width updates do not erase after the last character` 还检查字节：满宽的行之后没有 EL。
 - **视口高度代替末尾换行。** Ink 的 log-update 测试为每帧选择是否带末尾换行，ink-rs 由视口高度决定：帧高达到屏高时不带。移植版为每个测试选视口高度，让被断言的帧停在 Ink 的位置。`incremental rendering - no trailing newline: shrink` 从满屏缩短，两帧无法同时对上：缩短后光标按 design.md 停在帧的下一行，Ink 的测试停在帧的最后一行。Ink 的公开 render 退出满屏后，光标也停在帧的下一行。
 - **SGR 字节检查改为完整比较。** Ink 有 16 个测试用 `includes()` 检查 chalk 生成的 SGR 字节，如 `\x1b[41m`。移植版改用 `assert_ansi_eq` 比较完整输出，完整输出取自 Ink 测试运行时的记录。这样检查样式语义，不锁定 SGR 的写法。涉及 `background.tsx` 8 个、`border-backgrounds.tsx` 4 个、`borders.tsx` 1 个、`text.tsx` 3 个。
