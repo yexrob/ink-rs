@@ -2,6 +2,7 @@ use std::any::{Any, TypeId};
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use super::focus::{FocusManager, FocusOptions, FocusRegistration};
 use super::input::{Handler, InputHandler, PasteHandler, Registration};
 use super::output::{CursorCleanup, CursorPosition, OutputStream, OutputWriter};
 use super::state::{ElementMetrics, NodeRef, State, StateSlot, Store};
@@ -56,6 +57,55 @@ pub struct Scope<'a> {
 }
 
 impl Scope<'_> {
+    /// Registers a focusable hook and returns whether its ID has focus.
+    /// Defaults are active, no autofocus, and a generated ID. Layout effects
+    /// register then activate the hook, so autofocus appears in the first frame.
+    /// Registration order governs navigation, not keyed tree order; changing ID
+    /// or autofocus appends a new registration. Duplicate IDs share focus, but
+    /// cleanup and activation affect this hook's entry, not its duplicates.
+    /// Active hooks hold raw mode on TTY stdin; non-TTY stdin skips that hold.
+    /// Tab/Shift+Tab navigate; unmodified Esc clears focus. Releases are ignored,
+    /// repeats count as presses, and Ctrl/Meta/Super/Hyper block both keys.
+    /// Shift blocks Esc. Both keys reach input handlers after focus changes.
+    pub fn use_focus(&mut self, options: FocusOptions) -> bool {
+        let manager = self.use_focus_manager();
+        let store = self.store.clone();
+        let key = self.use_memo((), move || store.focus.borrow_mut().allocate());
+        let generated = self.use_memo((), || format!("ink-rs:focus:{key}"));
+        let id = options.id.unwrap_or(generated);
+        let store = self.store.clone();
+        let registration_id = id.clone();
+        self.use_layout_effect((id.clone(), options.auto_focus), move || {
+            FocusRegistration::new(store, key, registration_id, options.auto_focus)
+        });
+        let store = self.store.clone();
+        // Ink use-focus.ts reapplies activation after every re-registration.
+        self.use_layout_effect(
+            (options.active, id.clone(), options.auto_focus),
+            move || {
+                store.update_focus(|focus| focus.activate(key, options.active));
+            },
+        );
+        let store = self.store.clone();
+        self.use_effect(options.active, move || {
+            options
+                .active
+                .then(|| Registration::new(store, Handler::Focus(key)))
+        });
+        manager.active_id().as_ref() == Some(&id)
+    }
+
+    /// Returns the runtime's focus manager and subscribes this component to ID
+    /// changes. Focus starts enabled; disable clears focus, enable does not
+    /// restore it. The handle reads live state and can be captured by effects
+    /// and input handlers without cloning.
+    pub fn use_focus_manager(&mut self) -> FocusManager {
+        let store = self.store.clone();
+        let dirty = self.dirty.clone();
+        self.use_memo((), move || store.focus.borrow_mut().add_reader(&dirty));
+        FocusManager::new(self.store)
+    }
+
     /// Handles input while `active`, enabling raw mode through a passive effect.
     /// The handler receives text and key identity/modifiers; text runs and paste
     /// fallback stay one call, while functional keys may carry empty text.

@@ -16,6 +16,7 @@ pub(super) type PasteHandler = Rc<RefCell<Box<dyn FnMut(&str)>>>;
 pub(super) enum Handler {
     Input(InputHandler),
     Paste(PasteHandler),
+    Focus(u64),
 }
 
 impl Handler {
@@ -23,6 +24,7 @@ impl Handler {
         match (self, other) {
             (Self::Input(a), Self::Input(b)) => Rc::ptr_eq(a, b),
             (Self::Paste(a), Self::Paste(b)) => Rc::ptr_eq(a, b),
+            (Self::Focus(a), Self::Focus(b)) => a == b,
             _ => false,
         }
     }
@@ -75,6 +77,17 @@ impl Runtime {
             .handlers
             .iter()
             .filter(|handler| matches!(handler, Handler::Paste(_)))
+            .count()
+    }
+
+    pub(crate) fn focus_holders(&self) -> usize {
+        self.instance
+            .store
+            .input
+            .borrow()
+            .handlers
+            .iter()
+            .filter(|handler| matches!(handler, Handler::Focus(_)))
             .count()
     }
 
@@ -164,6 +177,26 @@ impl Runtime {
         {
             self.queue().request_exit(Ok(None));
             return;
+        }
+        // Ink's App effect installs Tab after mount-time input listeners.
+        // Here focus precedes all handlers: a live active_id read sees the new
+        // ID. Neither Tab nor Esc is consumed by focus management.
+        if parsed.event_type != Some(KeyEventType::Release)
+            && !parsed.ctrl
+            && !parsed.meta
+            && !parsed.super_key
+            && !parsed.hyper
+        {
+            self.instance.store.update_focus(|focus| {
+                if !focus.enabled {
+                    return;
+                }
+                match parsed.name.as_str() {
+                    "escape" if !parsed.shift => focus.active = None,
+                    "tab" if focus.has_entries() => focus.navigate(parsed.shift),
+                    _ => {}
+                }
+            });
         }
         let (text, key) = parsed.into();
         // EventEmitter.emit snapshots listeners. No shared Store borrow crosses

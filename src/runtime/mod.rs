@@ -19,6 +19,7 @@ use hooks::{Hook, Kind, Value};
 use state::{RenderGuard, Store};
 
 mod app_handle;
+mod focus;
 mod hooks;
 mod input;
 mod output;
@@ -29,6 +30,7 @@ mod tests;
 
 pub use app_handle::AppHandle;
 pub(crate) use app_handle::{ExitResult, UpdateQueue, Wake};
+pub use focus::{FocusManager, FocusOptions};
 pub use hooks::Scope;
 pub(crate) use output::WriteDestination;
 pub use output::{CursorPosition, OutputStream, OutputWriter};

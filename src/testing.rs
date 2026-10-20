@@ -33,6 +33,7 @@ pub fn render_with(element: impl Into<Element>, options: RenderOptions) -> TestI
         destination,
         frames: Vec::new(),
         stderr: Vec::new(),
+        now: Instant::now(),
     };
     instance.step();
     instance
@@ -40,6 +41,7 @@ pub fn render_with(element: impl Into<Element>, options: RenderOptions) -> TestI
 
 /// A tree that retains state across frames. Dropping it runs unmount cleanups.
 pub struct TestInstance {
+    now: Instant,
     runtime: Runtime,
     destination: Rc<RefCell<DebugOutput>>,
     frames: Vec<String>,
@@ -95,6 +97,23 @@ impl WriteDestination for RefCell<DebugOutput> {
 }
 
 impl TestInstance {
+    /// Feeds one stdin read at the current clock time, then settles the tree.
+    /// Input reaches the runtime while any input, paste or focus holder exists.
+    /// There is no raw-mode check; Ctrl+C latches an exit request that stops
+    /// later input. A lone Esc waits 20 ms; call [`Self::advance`] to flush it.
+    pub fn input(&mut self, bytes: impl AsRef<[u8]>) {
+        self.runtime.input(bytes.as_ref(), self.now);
+        self.settle();
+    }
+
+    /// Advances the instance clock, flushes pending input and settles the tree.
+    /// Advancing by 20 ms after a lone Esc delivers it to focus and input hooks.
+    pub fn advance(&mut self, duration: Duration) {
+        self.now += duration;
+        self.runtime.flush_input(self.now);
+        self.settle();
+    }
+
     /// The last debug stdout entry, from a present or an external write.
     /// Entries contain accumulated Static rows and the last live output;
     /// stdout writes prefix their data, while stderr writes replay the frame.
@@ -135,7 +154,7 @@ impl TestInstance {
     }
 
     fn step(&mut self) -> Option<Instant> {
-        let due = self.runtime.render_if_due(Instant::now(), |frame| {
+        let due = self.runtime.render_if_due(self.now, |frame| {
             self.destination.borrow_mut().paint(frame);
         });
         let mut output = self.destination.borrow_mut();
@@ -300,9 +319,9 @@ pub struct TestApp {
 
 impl TestApp {
     /// Feeds one stdin read at the current clock time, then runs a step.
-    /// Input reaches active [`crate::Scope::use_input`] or [`crate::Scope::use_paste`]
-    /// hooks. A lone Esc or an incomplete sequence waits 20 ms; call
-    /// [`Self::advance`] to flush it.
+    /// Input reaches active [`crate::Scope::use_input`], [`crate::Scope::use_paste`]
+    /// or [`crate::Scope::use_focus`] hooks. A lone Esc or an incomplete
+    /// sequence waits 20 ms; call [`Self::advance`] to flush it.
     pub fn input(&mut self, bytes: impl AsRef<[u8]>) {
         self.app.input(bytes.as_ref(), self.now);
         self.step();

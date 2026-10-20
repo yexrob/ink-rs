@@ -445,7 +445,18 @@ impl App {
             runtime.after_write();
             self.pending |= cursor != runtime.cursor();
         }
-        let raw_mode = runtime.input_holders() > 0;
+        let stdin_tty = self.destination.borrow().terminal.stdin_is_tty();
+        let holders = runtime.input_holders();
+        // Ink use-focus.ts skips setRawMode on unsupported stdin, unlike
+        // use_input and use_paste, which retain their Unsupported error.
+        if !stdin_tty && holders > runtime.focus_holders() {
+            self.queue.request_exit(Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "raw mode is not supported on stdin",
+            )
+            .into()));
+        }
+        let raw_mode = stdin_tty && holders > 0;
         let paste_mode = raw_mode && runtime.paste_holders() > 0;
         // Ink switches paste inside effects; end-of-step comparison avoids
         // mode writes for a use_paste swap in one commit. Disable paste before
@@ -455,18 +466,10 @@ impl App {
         }
         if raw_mode != self.raw_mode {
             let mut destination = self.destination.borrow_mut();
-            if raw_mode && !destination.terminal.stdin_is_tty() {
-                self.queue.request_exit(Err(io::Error::new(
-                    io::ErrorKind::Unsupported,
-                    "raw mode is not supported on stdin",
-                )
-                .into()));
-            } else {
-                // Ink defers disable to a microtask; the end of a step gives
-                // same-commit holder swaps the same terminal-mode lifetime.
-                destination.terminal.set_raw_mode(raw_mode);
-                self.raw_mode = raw_mode;
-            }
+            // Ink defers disable to a microtask; the end of a step gives
+            // same-commit holder swaps the same terminal-mode lifetime.
+            destination.terminal.set_raw_mode(raw_mode);
+            self.raw_mode = raw_mode;
         }
         self.destination
             .borrow_mut()
