@@ -228,6 +228,7 @@ impl Scope<'_> {
 
     /// Returns a writer for stdout. Writes preserve the last painted frame and
     /// do not wait for the frame throttle. No stream object is exposed.
+    /// [`OutputWriter::write_control`] sends raw sequences without redrawing.
     pub fn use_stdout(&mut self) -> OutputWriter {
         OutputWriter::new(self.store, OutputStream::Stdout)
     }

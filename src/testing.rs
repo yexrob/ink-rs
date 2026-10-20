@@ -94,6 +94,8 @@ impl WriteDestination for RefCell<DebugOutput> {
         let frame = format!("{prefix}{}{}", output.static_output, output.live);
         output.frames.push(frame);
     }
+
+    fn write_control(&self, _stream: OutputStream, _bytes: &[u8]) {}
 }
 
 impl TestInstance {

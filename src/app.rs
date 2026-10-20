@@ -82,6 +82,7 @@ struct AppOutput {
     static_rows: Vec<Vec<Cell>>,
     last_frame: Option<Frame>,
     last_cursor: Option<(usize, usize)>,
+    control: Vec<(OutputStream, Vec<u8>)>,
 }
 
 impl AppOutput {
@@ -184,6 +185,18 @@ impl AppOutput {
             }
         }
         self.write(bytes);
+        // Control bytes follow the committed frame, even when its diff is empty.
+        self.flush_control();
+    }
+
+    fn flush_control(&mut self) {
+        let restore = self.restore_bytes();
+        for (stream, bytes) in self.control.drain(..) {
+            match stream {
+                OutputStream::Stdout => self.terminal.write(&bytes, &restore),
+                OutputStream::Stderr => self.terminal.write_stderr(&bytes, &restore),
+            }
+        }
     }
 
     fn write(&mut self, mut bytes: Vec<u8>) {
@@ -289,6 +302,10 @@ impl AppOutput {
 impl WriteDestination for RefCell<AppOutput> {
     fn write(&self, stream: OutputStream, data: &str) {
         self.borrow_mut().external_write(stream, data);
+    }
+
+    fn write_control(&self, stream: OutputStream, bytes: &[u8]) {
+        self.borrow_mut().control.push((stream, bytes.to_vec()));
     }
 }
 
@@ -472,6 +489,7 @@ impl App {
             static_rows: Vec::new(),
             last_frame: None,
             last_cursor: None,
+            control: Vec::new(),
         }));
         // Ink initKittyKeyboard follows setAlternateScreen, before the first frame.
         let mut kitty_query = None;
@@ -616,6 +634,10 @@ impl App {
                 .borrow_mut()
                 .set_paste_mode(self.raw_mode && paste_mode);
         }
+        // With no frame to wait for, control bytes leave at the end of this step.
+        if !self.interactive || !(suspended || self.pending || runtime.has_work()) {
+            self.destination.borrow_mut().flush_control();
+        }
         if self.queue.has_exit() {
             self.unmount();
             return None;
@@ -701,6 +723,7 @@ impl App {
             // Cleanup runs user code: a second panic aborts the process, so
             // restore before dropping the tree rather than Ink's normal order.
             self.runtime.as_mut().unwrap().begin_unmount();
+            self.destination.borrow_mut().control.clear();
             self.destination.borrow_mut().restore(Vec::new());
             drop(self.runtime.take());
             return;
@@ -735,6 +758,15 @@ impl App {
                 .join("\n")
                 .into_bytes();
             final_output.push(b'\n');
+        }
+        {
+            let mut output = self.destination.borrow_mut();
+            // Finish queued control writes before cleanup, unless the terminal is handed over.
+            if self.interactive && self.is_suspended() {
+                output.control.clear();
+            } else {
+                output.flush_control();
+            }
         }
         let runtime = self.runtime.as_mut().unwrap();
         runtime.begin_unmount();
