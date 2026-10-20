@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use taffy::{NodeId, TaffyTree};
+use taffy::{Cache, Layout, NodeId, Size};
 
 use crate::components::TextStyle;
 use crate::text::styled::{self, CharStyle, StyledLine, StyledText};
@@ -9,7 +9,61 @@ use crate::{ColorLevel, Style, TextWrap};
 mod build;
 pub(crate) use build::build;
 
-pub(crate) type HostTree = TaffyTree<HostNode>;
+pub(crate) struct HostTree {
+    nodes: Vec<LayoutNode>,
+}
+
+pub(crate) struct LayoutNode {
+    pub(crate) parent: Option<NodeId>,
+    pub(crate) children: Vec<NodeId>,
+    pub(crate) props: HostNode,
+    pub(crate) style: taffy::Style,
+    pub(crate) cache: Cache,
+    pub(crate) layout: Layout,
+    pub(crate) hoisted_children: Vec<NodeId>,
+    pub(crate) available_inner_size: Size<Option<f32>>,
+    pub(crate) definite_inner_size: Size<Option<f32>>,
+}
+
+impl HostTree {
+    pub(crate) fn new() -> Self {
+        Self { nodes: Vec::new() }
+    }
+
+    pub(crate) fn node(&self, node: NodeId) -> &LayoutNode {
+        &self.nodes[usize::from(node)]
+    }
+
+    pub(crate) fn node_mut(&mut self, node: NodeId) -> &mut LayoutNode {
+        &mut self.nodes[usize::from(node)]
+    }
+
+    pub(crate) fn parent(&self, node: NodeId) -> Option<NodeId> {
+        self.node(node).parent
+    }
+
+    pub(crate) fn children(&self, node: NodeId) -> &[NodeId] {
+        &self.node(node).children
+    }
+
+    pub(crate) fn props(&self, node: NodeId) -> &HostNode {
+        &self.node(node).props
+    }
+
+    pub(crate) fn unrounded_layout(&self, node: NodeId) -> &Layout {
+        &self.node(node).layout
+    }
+
+    fn mark_dirty(&mut self, node: NodeId) {
+        let mut current = Some(node);
+        while let Some(id) = current {
+            let node = self.node_mut(id);
+            // Yoga markDirty propagates measurements affected by a mutation to ancestors.
+            node.cache.clear();
+            current = node.parent;
+        }
+    }
+}
 pub(crate) type TransformFn = Rc<dyn Fn(&str, usize) -> String>;
 
 #[derive(Clone)]
@@ -123,7 +177,18 @@ pub(crate) fn create_text(tree: &mut HostTree, text: TextNode) -> NodeId {
 }
 
 fn create(tree: &mut HostTree, props: HostNode) -> NodeId {
-    let node = tree.new_leaf(taffy::Style::default()).unwrap();
+    let node = NodeId::from(tree.nodes.len());
+    tree.nodes.push(LayoutNode {
+        parent: None,
+        children: Vec::new(),
+        style: taffy::Style::default(),
+        props: props.clone(),
+        cache: Cache::new(),
+        layout: Layout::default(),
+        hoisted_children: Vec::new(),
+        available_inner_size: Size::NONE,
+        definite_inner_size: Size::NONE,
+    });
     set_props(tree, node, props);
     node
 }
@@ -131,12 +196,12 @@ fn create(tree: &mut HostTree, props: HostNode) -> NodeId {
 /// Replacing inline content or wrapping must invalidate measurements (Ink dom.ts).
 pub(crate) fn set_props(tree: &mut HostTree, node: NodeId, props: HostNode) {
     assert!(
-        props.text.is_none() || tree.children(node).unwrap().is_empty(),
+        props.text.is_none() || tree.children(node).is_empty(),
         "text is a layout leaf"
     );
-    tree.set_style(node, crate::layout::map_style(&props.style))
-        .unwrap();
-    tree.set_node_context(node, Some(props)).unwrap();
+    tree.node_mut(node).style = crate::layout::map_style(&props.style);
+    tree.node_mut(node).props = props;
+    tree.mark_dirty(node);
 }
 
 pub(crate) fn append_child(tree: &mut HostTree, parent: NodeId, child: NodeId) {
@@ -145,7 +210,14 @@ pub(crate) fn append_child(tree: &mut HostTree, parent: NodeId, child: NodeId) {
 
 /// A detached node stays allocated and may be inserted under another parent.
 pub(crate) fn remove_child(tree: &mut HostTree, parent: NodeId, child: NodeId) {
-    tree.remove_child(parent, child).unwrap();
+    let index = tree
+        .children(parent)
+        .iter()
+        .position(|&id| id == child)
+        .expect("child must belong to parent");
+    tree.mark_dirty(child);
+    tree.node_mut(parent).children.remove(index);
+    tree.node_mut(child).parent = None;
 }
 
 pub(crate) fn insert_child(
@@ -154,21 +226,20 @@ pub(crate) fn insert_child(
     child: NodeId,
     before: Option<NodeId>,
 ) {
-    assert!(
-        tree.get_node_context(parent).unwrap().text.is_none(),
-        "text is a layout leaf"
-    );
+    assert!(tree.props(parent).text.is_none(), "text is a layout leaf");
     if before == Some(child) && tree.parent(child) == Some(parent) {
         return;
     }
     if let Some(old_parent) = tree.parent(child) {
         remove_child(tree, old_parent, child);
     }
-    let children = tree.children(parent).unwrap();
+    let children = tree.children(parent);
     let index = before
         .and_then(|before| children.iter().position(|&id| id == before))
         .unwrap_or(children.len());
-    tree.insert_child_at_index(parent, index, child).unwrap();
+    tree.node_mut(parent).children.insert(index, child);
+    tree.node_mut(child).parent = Some(parent);
+    tree.mark_dirty(child);
 }
 
 pub(crate) fn text_style(style: TextStyle, level: ColorLevel) -> CharStyle {

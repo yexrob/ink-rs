@@ -1,5 +1,6 @@
 use taffy::prelude::TaffyMaxContent;
 use taffy::{self as t, AvailableSpace, NodeId, Rect, Size, compute::compute_leaf_layout};
+use taffy::{MaybeMath, MaybeResolve, ResolveOrZero};
 
 use crate::host::HostTree;
 use crate::style::{Sides, Spacing};
@@ -11,49 +12,289 @@ use crate::{
 
 pub(crate) fn compute(tree: &mut HostTree, root: NodeId) {
     // Consumers use get() for Yoga-compatible text rounding.
-    tree.disable_rounding();
-    tree.compute_layout_with_measure(root, Size::MAX_CONTENT, |inputs, _, context, style| {
-        compute_leaf_layout(
-            inputs,
-            style,
-            |_, _| 0.0,
-            |known, available| {
-                let Some(text) = context.and_then(|node| node.text.as_ref()) else {
-                    return Size::ZERO;
-                };
-                let lines = text.squash();
-                let natural = measure_text(&lines);
-                // Ink dom.ts treats both intrinsic requests as Yoga's undefined mode.
-                let width = known.width.or(match available.width {
-                    AvailableSpace::Definite(width) => Some(width),
-                    _ => None,
-                });
-                let measured =
-                    if let Some(width) = width.filter(|&width| (natural.width as f32) > width) {
-                        let measured =
-                            measure_text(&wrap_text(&lines, width.max(0.0) as usize, text.wrap));
+    t::compute_root_layout(tree, root, Size::MAX_CONTENT);
+}
+
+impl t::TraversePartialTree for HostTree {
+    type ChildIter<'a> = std::iter::Copied<std::slice::Iter<'a, NodeId>>;
+
+    fn child_ids(&self, node: NodeId) -> Self::ChildIter<'_> {
+        self.children(node).iter().copied()
+    }
+
+    fn child_count(&self, node: NodeId) -> usize {
+        self.children(node).len()
+    }
+
+    fn get_child_id(&self, node: NodeId, index: usize) -> NodeId {
+        self.children(node)[index]
+    }
+}
+
+impl t::TraverseTree for HostTree {}
+
+impl t::CacheTree for HostTree {
+    fn cache_get(&mut self, node: NodeId, inputs: &t::LayoutInput) -> Option<t::LayoutOutput> {
+        self.node_mut(node).cache.get(inputs)
+    }
+
+    fn cache_store(&mut self, node: NodeId, inputs: &t::LayoutInput, output: t::LayoutOutput) {
+        self.node_mut(node).cache.store(inputs, output);
+    }
+
+    fn cache_clear(&mut self, node: NodeId) {
+        self.node_mut(node).cache.clear();
+    }
+}
+
+impl t::LayoutPartialTree for HostTree {
+    type CoreContainerStyle<'a> = &'a t::Style;
+    type CustomIdent = <t::Style as t::CoreStyle>::CustomIdent;
+
+    fn get_core_container_style(&self, node: NodeId) -> &t::Style {
+        &self.node(node).style
+    }
+
+    fn set_unrounded_layout(&mut self, node: NodeId, layout: &t::Layout) {
+        self.node_mut(node).layout = *layout;
+    }
+
+    fn compute_child_layout(
+        &mut self,
+        node: NodeId,
+        mut inputs: t::LayoutInput,
+    ) -> t::LayoutOutput {
+        if inputs.run_mode == t::RunMode::PerformHiddenLayout {
+            return t::compute_hidden_layout(self, node);
+        }
+        constrain_measurement(self, node, &mut inputs);
+        t::compute_cached_layout(self, node, inputs, |tree, node, inputs| {
+            record_inner_size(tree, node, inputs);
+            let mut output = if tree.node(node).style.display == t::Display::None {
+                t::compute_hidden_layout(tree, node)
+            } else if !tree.children(node).is_empty() {
+                t::compute_flexbox_layout(tree, node, inputs)
+            } else {
+                compute_leaf_layout(
+                    inputs,
+                    &tree.node(node).style,
+                    |_, _| 0.0,
+                    |known, available| {
+                        let Some(text) = tree.node(node).props.text.as_ref() else {
+                            return Size::ZERO;
+                        };
+                        let lines = text.squash();
+                        let natural = measure_text(&lines);
+                        // Ink dom.ts treats both intrinsic requests as Yoga's undefined mode.
+                        let width = known.width.or(match available.width {
+                            AvailableSpace::Definite(width) => Some(width),
+                            _ => None,
+                        });
+                        let measured = if let Some(width) =
+                            width.filter(|&width| (natural.width as f32) > width)
+                        {
+                            let measured = measure_text(&wrap_text(
+                                &lines,
+                                width.max(0.0) as usize,
+                                text.wrap,
+                            ));
+                            Size {
+                                width: if matches!(text.wrap, TextWrap::Wrap | TextWrap::Hard) {
+                                    measured.width as f32
+                                } else {
+                                    width
+                                },
+                                height: measured.height as f32,
+                            }
+                        } else {
+                            Size {
+                                width: natural.width as f32,
+                                height: natural.height as f32,
+                            }
+                        };
                         Size {
-                            width: if matches!(text.wrap, TextWrap::Wrap | TextWrap::Hard) {
-                                measured.width as f32
-                            } else {
-                                width
-                            },
-                            height: measured.height as f32,
+                            width: known.width.unwrap_or(measured.width.ceil()),
+                            height: known.height.unwrap_or(measured.height),
                         }
-                    } else {
-                        Size {
-                            width: natural.width as f32,
-                            height: natural.height as f32,
-                        }
-                    };
-                Size {
-                    width: known.width.unwrap_or(measured.width.ceil()),
-                    height: known.height.unwrap_or(measured.height),
-                }
-            },
-        )
-    })
-    .unwrap();
+                    },
+                )
+            };
+            if inputs.run_mode == t::RunMode::PerformLayout {
+                t::compute_oof_layout(tree, node, &mut output);
+            }
+            output
+        })
+    }
+}
+
+impl t::LayoutContainingBlock for HostTree {
+    type OofItemStyle<'a> = &'a t::Style;
+
+    fn get_oof_item_style(&self, node: NodeId) -> &t::Style {
+        &self.node(node).style
+    }
+
+    fn clear_hoisted_children(&mut self, node: NodeId) {
+        self.node_mut(node).hoisted_children.clear();
+    }
+
+    fn add_hoisted_children(&mut self, node: NodeId, hoisted: &[NodeId]) {
+        self.node_mut(node)
+            .hoisted_children
+            .extend_from_slice(hoisted);
+    }
+}
+
+impl t::LayoutFlexboxContainer for HostTree {
+    type FlexboxContainerStyle<'a> = &'a t::Style;
+    type FlexboxItemStyle<'a> = t::Style;
+
+    fn get_flexbox_container_style(&self, node: NodeId) -> &t::Style {
+        &self.node(node).style
+    }
+
+    fn get_flexbox_child_style(&self, node: NodeId) -> t::Style {
+        let mut style = self.node(node).style.clone();
+        let Some(ratio) = style.aspect_ratio else {
+            return style;
+        };
+        if style.position.is_out_of_flow() {
+            return style;
+        }
+        let Some(parent) = self.parent(node) else {
+            return style;
+        };
+        let parent = self.node(parent);
+        let row = matches!(
+            parent.style.flex_direction,
+            t::FlexDirection::Row | t::FlexDirection::RowReverse
+        );
+        let main_axis = if row {
+            t::AbsoluteAxis::Horizontal
+        } else {
+            t::AbsoluteAxis::Vertical
+        };
+        let cross_axis = main_axis.other_axis();
+        let size = style
+            .size
+            .maybe_resolve(parent.definite_inner_size, |_, _| 0.0);
+        let alignment = style.align_self.unwrap_or(parent.style.align_items);
+        // Yoga computeFlexBasisForChild transfers a definite cross size (including
+        // exact stretch) to an automatic main size. At-most space is not exact stretch.
+        if size.get_abs(main_axis).is_none() {
+            let cross = size.get_abs(cross_axis).or_else(|| {
+                (alignment == t::AlignSelf::STRETCH)
+                    .then(|| {
+                        let margin = style
+                            .margin
+                            .resolve_or_zero(parent.definite_inner_size.width, |_, _| 0.0);
+                        parent
+                            .definite_inner_size
+                            .get_abs(cross_axis)
+                            .map(|cross| (cross - margin.sum_axes().get_abs(cross_axis)).max(0.0))
+                    })
+                    .flatten()
+            });
+            if let Some(cross) = cross {
+                set_axis(
+                    &mut style.size,
+                    main_axis,
+                    t::Dimension::length(if row { cross * ratio } else { cross / ratio }),
+                );
+            }
+        }
+        // Yoga distributeFreeSpaceSecondPass gives the ratio precedence over the
+        // cross style and stretch. Keep the node's own container style intact.
+        // Taffy resolves this cross size before flexing; the style view cannot
+        // transfer a changed main size after grow/shrink (see docs/design.md).
+        set_axis(&mut style.size, cross_axis, t::Dimension::auto());
+        if alignment == t::AlignSelf::STRETCH {
+            style.align_self = Some(t::AlignSelf::FLEX_START);
+        }
+        style
+    }
+}
+
+fn set_axis<T>(size: &mut Size<T>, axis: t::AbsoluteAxis, value: T) {
+    match axis {
+        t::AbsoluteAxis::Horizontal => size.width = value,
+        t::AbsoluteAxis::Vertical => size.height = value,
+    }
+}
+
+fn constrain_measurement(tree: &HostTree, node: NodeId, inputs: &mut t::LayoutInput) {
+    let child = tree.node(node);
+    if inputs.sizing_mode != t::SizingMode::ContentSize || child.style.position.is_out_of_flow() {
+        return;
+    }
+    let Some(parent) = child.parent.map(|parent| tree.node(parent)) else {
+        return;
+    };
+    let size = child
+        .style
+        .size
+        .maybe_resolve(parent.definite_inner_size, |_, _| 0.0);
+    let margin = child
+        .style
+        .margin
+        .resolve_or_zero(parent.available_inner_size.width, |_, _| 0.0)
+        .sum_axes();
+    // Yoga computeFlexBasisForChild and the post-flex cross measurement use AtMost
+    // instead of taffy's max-content request. Rewrite before the cache lookup.
+    for axis in [t::AbsoluteAxis::Horizontal, t::AbsoluteAxis::Vertical] {
+        if inputs.known_dimensions.get_abs(axis).is_none()
+            && size.get_abs(axis).is_none()
+            && inputs.available_space.get_abs(axis) == AvailableSpace::MaxContent
+            && let Some(available) = parent.available_inner_size.get_abs(axis)
+        {
+            set_axis(
+                &mut inputs.available_space,
+                axis,
+                AvailableSpace::Definite((available - margin.get_abs(axis)).max(0.0)),
+            );
+        }
+    }
+}
+
+fn record_inner_size(tree: &mut HostTree, node: NodeId, inputs: t::LayoutInput) {
+    let style = &tree.node(node).style;
+    let padding_border = (style
+        .padding
+        .resolve_or_zero(inputs.parent_size.width, |_, _| 0.0)
+        + style
+            .border
+            .resolve_or_zero(inputs.parent_size.width, |_, _| 0.0))
+    .sum_axes();
+    let min = style.min_size.maybe_resolve(inputs.parent_size, |_, _| 0.0);
+    let max = style.max_size.maybe_resolve(inputs.parent_size, |_, _| 0.0);
+    let styled = if inputs.sizing_mode == t::SizingMode::InherentSize {
+        style
+            .size
+            .maybe_resolve(inputs.parent_size, |_, _| 0.0)
+            .maybe_apply_aspect_ratio(style.aspect_ratio)
+    } else {
+        Size::NONE
+    };
+    let exact = inputs.known_dimensions.or(styled);
+    // Yoga calculateAvailableInnerDimension: preserve undefined space, subtract
+    // padding/border and clamp to the inner min/max. Each active container owns
+    // this context so descendant calls cannot overwrite their parent's constraints.
+    let available = exact
+        .or(inputs.available_space.into_options())
+        .maybe_clamp(min, max)
+        .maybe_sub(padding_border)
+        .maybe_max(Size::ZERO);
+    let definite = inputs
+        .known_dimensions
+        .zip_map(inputs.known_dimensions_are_definite, |size, definite| {
+            size.filter(|_| definite)
+        })
+        .or(styled)
+        .maybe_clamp(min, max)
+        .maybe_sub(padding_border)
+        .maybe_max(Size::ZERO);
+    tree.node_mut(node).available_inner_size = available;
+    tree.node_mut(node).definite_inner_size = definite;
 }
 
 /// Yoga's text nodes floor their origin and round their extent outwards when
@@ -68,7 +309,7 @@ pub(crate) fn get(
         x: parent_absolute.x + layout.location.x,
         y: parent_absolute.y + layout.location.y,
     };
-    let text = tree.get_node_context(node).unwrap().text.is_some();
+    let text = tree.props(node).text.is_some();
     fn round(value: f32, floor: bool, ceil: bool) -> f32 {
         let fraction = value - value.floor();
         if fraction < 0.0001 {

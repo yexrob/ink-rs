@@ -227,7 +227,7 @@ pub(crate) fn paint(tree: &HostTree, root: NodeId, level: ColorLevel) -> Frame {
     if let Some((node, parent_absolute)) = find_static(tree, root, Point::ZERO) {
         let mut ancestor = Some(node);
         while let Some(id) = ancestor {
-            if tree.get_node_context(id).unwrap().style.display == Display::None {
+            if tree.props(id).style.display == Display::None {
                 return frame;
             }
             ancestor = tree.parent(id);
@@ -258,7 +258,7 @@ fn find_static(
     node: NodeId,
     parent_absolute: Point<f32>,
 ) -> Option<(NodeId, Point<f32>)> {
-    if tree.get_node_context(node).unwrap().is_static {
+    if tree.props(node).is_static {
         return Some((node, parent_absolute));
     }
     let location = tree.unrounded_layout(node).location;
@@ -267,8 +267,8 @@ fn find_static(
         y: parent_absolute.y + location.y,
     };
     tree.children(node)
-        .unwrap()
-        .into_iter()
+        .iter()
+        .copied()
         .find_map(|child| find_static(tree, child, absolute))
 }
 
@@ -288,7 +288,7 @@ fn walk(
     level: ColorLevel,
     skip_static: bool,
 ) {
-    let props = tree.get_node_context(node).unwrap();
+    let props = tree.props(node);
     let style = &props.style;
     if style.display == Display::None || (skip_static && props.is_static) {
         return;
@@ -338,7 +338,7 @@ fn walk(
         },
         layout: absolute,
     };
-    for child in tree.children(node).unwrap() {
+    for &child in tree.children(node) {
         walk(tree, child, offset, clip, output, level, skip_static);
     }
 }
