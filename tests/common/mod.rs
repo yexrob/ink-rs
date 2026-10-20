@@ -419,7 +419,7 @@ pub struct Screen {
 impl Screen {
     pub fn new(terminal: &ink_rs::testing::TestTerminal, columns: u16, rows: u16) -> Self {
         let mut parser = vt100::Parser::new(rows, columns, 1000);
-        for write in terminal.writes() {
+        for (_, write) in terminal.output() {
             parser.process(write.as_bytes());
         }
         Self { parser, columns }
@@ -427,6 +427,18 @@ impl Screen {
 
     pub fn rows(&self) -> Vec<String> {
         self.parser.screen().rows(0, self.columns).collect()
+    }
+
+    pub fn cursor(&self) -> (u16, u16) {
+        self.parser.screen().cursor_position()
+    }
+
+    pub fn cursor_visible(&self) -> bool {
+        !self.parser.screen().hide_cursor()
+    }
+
+    pub fn alternate_screen(&self) -> bool {
+        self.parser.screen().alternate_screen()
     }
 
     pub fn scrollback(&mut self) -> Vec<String> {

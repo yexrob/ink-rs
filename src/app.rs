@@ -1,10 +1,12 @@
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use crate::output::Output;
-use crate::paint::{Cell, serialize_row};
-use crate::runtime::Runtime;
+use crate::paint::{Cell, Frame, serialize_row};
+use crate::runtime::{Runtime, WriteDestination};
 use crate::terminal::Terminal;
-use crate::{ColorLevel, Element, RenderOptions};
+use crate::{ColorLevel, CursorPosition, Element, OutputStream, RenderOptions};
 
 /// Options for a live app, including [`crate::testing::mount`].
 #[derive(Clone, Copy, Debug)]
@@ -43,8 +45,9 @@ pub(crate) fn synchronize(bytes: &mut Vec<u8>) {
     }
 }
 
-pub(crate) struct App {
-    runtime: Option<Runtime>,
+// Runtime runs user code without borrowing this destination. Only completed
+// frames enter it, so effects and cleanups can write during a commit.
+struct AppOutput {
     output: Output,
     terminal: Box<dyn Terminal>,
     columns: usize,
@@ -52,10 +55,144 @@ pub(crate) struct App {
     tty: bool,
     interactive: bool,
     alternate: bool,
+    static_rows: Vec<Vec<Cell>>,
+    last_frame: Option<Frame>,
+    last_cursor: Option<(usize, usize)>,
+}
+
+impl AppOutput {
+    fn paint(&mut self, mut frame: Frame, cursor: Option<CursorPosition>) {
+        let mut bytes = Vec::new();
+        if self.interactive {
+            let mut cursor = cursor.map(|position| (position.x, position.y));
+            if self.alternate {
+                // Ink fullStaticOutput resets on identity changes. Copy at most
+                // one viewport of history, not the accumulated transcript.
+                if frame.static_changed {
+                    self.static_rows.clear();
+                }
+                self.static_rows.append(&mut frame.static_lines);
+                let start = self.static_rows.len().saturating_sub(self.rows);
+                let mut live = self.static_rows[start..].to_vec();
+                // useCursor starts below Static; Output clips the combined rows.
+                if let Some((_, y)) = &mut cursor {
+                    *y = y.saturating_add(live.len());
+                }
+                live.append(&mut frame.live);
+                frame.live = live;
+            }
+            // Ink renderInteractiveFrame never treats piped output as fullscreen.
+            let rows = if self.tty { self.rows } else { usize::MAX };
+            self.output
+                .render(&frame, cursor, self.columns, rows, &mut bytes);
+            frame.static_lines.clear();
+            self.last_frame = Some(frame);
+            self.last_cursor = cursor;
+        } else {
+            for row in &frame.static_lines {
+                bytes.extend_from_slice(serialize_row(row).as_bytes());
+                bytes.push(b'\n');
+            }
+        }
+        self.write(bytes);
+    }
+
+    fn write(&mut self, mut bytes: Vec<u8>) {
+        if bytes.is_empty() {
+            return;
+        }
+        if self.interactive && self.tty {
+            synchronize(&mut bytes);
+        }
+        self.terminal.write(&bytes);
+    }
+
+    fn clear(&mut self) {
+        if self.interactive {
+            let mut bytes = Vec::new();
+            self.output.clear(&mut bytes);
+            self.write(bytes);
+        }
+    }
+
+    fn external_write(&mut self, stream: OutputStream, data: &str) {
+        if !self.interactive {
+            match stream {
+                OutputStream::Stdout => self.terminal.write(data.as_bytes()),
+                OutputStream::Stderr => self.terminal.write_stderr(data.as_bytes()),
+            }
+            return;
+        }
+        let mut bytes = Vec::new();
+        if self.tty {
+            bytes.extend_from_slice(b"\x1b[?2026h");
+        }
+        self.output.clear(&mut bytes);
+        // crossterm raw mode clears OPOST. Redraw needs column zero on a new
+        // row, including when data has no final newline (unlike Ink's streams).
+        let mut data_bytes = Vec::with_capacity(data.len() + 2);
+        let mut previous = None;
+        for byte in data.bytes() {
+            if byte == b'\n' && previous != Some(b'\r') {
+                data_bytes.push(b'\r');
+            }
+            data_bytes.push(byte);
+            previous = Some(byte);
+        }
+        if !data.ends_with('\n') {
+            data_bytes.extend_from_slice(b"\r\n");
+        }
+        match stream {
+            OutputStream::Stdout => bytes.extend(data_bytes),
+            OutputStream::Stderr => {
+                if !bytes.is_empty() {
+                    self.terminal.write(&bytes);
+                }
+                bytes.clear();
+                self.terminal.write_stderr(&data_bytes);
+            }
+        }
+        // Ink restoreLastOutput restores painted output. Pending commits stay
+        // in Runtime until the app's throttle permits their paint.
+        if let Some(frame) = &self.last_frame {
+            let rows = if self.tty { self.rows } else { usize::MAX };
+            self.output
+                .render(frame, self.last_cursor, self.columns, rows, &mut bytes);
+        }
+        if self.tty {
+            bytes.extend_from_slice(b"\x1b[?2026l");
+        }
+        if !bytes.is_empty() {
+            self.terminal.write(&bytes);
+        }
+    }
+
+    fn restore(&mut self, mut final_output: Vec<u8>) {
+        if self.alternate {
+            final_output.extend_from_slice(b"\x1b[?1049l\x1b[?25h");
+            self.terminal.write(&final_output);
+        } else {
+            if self.interactive {
+                self.output.done(&mut final_output);
+            }
+            self.write(final_output);
+        }
+    }
+}
+
+impl WriteDestination for RefCell<AppOutput> {
+    fn write(&self, stream: OutputStream, data: &str) {
+        self.borrow_mut().external_write(stream, data);
+    }
+}
+
+pub(crate) struct App {
+    runtime: Option<Runtime>,
+    destination: Rc<RefCell<AppOutput>>,
+    interactive: bool,
     window: Duration,
     deadline: Option<Instant>,
     pending: bool,
-    static_rows: Vec<Vec<Cell>>,
 }
 
 impl App {
@@ -75,14 +212,14 @@ impl App {
             // design.md starts the alternate frame at the first row.
             terminal.write(b"\x1b[?1049h\x1b[H");
         }
-        Self {
-            runtime: Some(Runtime::new(
-                element,
-                RenderOptions {
-                    columns,
-                    color_level,
-                },
-            )),
+        let mut runtime = Runtime::new(
+            element,
+            RenderOptions {
+                columns,
+                color_level,
+            },
+        );
+        let destination = Rc::new(RefCell::new(AppOutput {
             output: Output::new(),
             terminal,
             columns: usize::from(columns),
@@ -90,6 +227,15 @@ impl App {
             tty,
             interactive,
             alternate,
+            static_rows: Vec::new(),
+            last_frame: None,
+            last_cursor: None,
+        }));
+        runtime.set_destination(destination.clone());
+        Self {
+            runtime: Some(runtime),
+            destination,
+            interactive,
             window: Duration::from_millis(if options.max_fps == 0 {
                 0
             } else {
@@ -97,7 +243,6 @@ impl App {
             }),
             deadline: None,
             pending: false,
-            static_rows: Vec::new(),
         }
     }
 
@@ -120,8 +265,7 @@ impl App {
             && self.pending
             && self.deadline.is_none_or(|deadline| now >= deadline);
         if immediate || due {
-            let bytes = self.paint();
-            self.write(bytes);
+            self.paint();
             if !immediate {
                 self.deadline = Some(now + self.window);
             }
@@ -131,62 +275,29 @@ impl App {
             runtime.passive_effects();
         }
         if immediate || due {
+            let cursor = runtime.cursor();
             runtime.after_write();
+            self.pending |= cursor != runtime.cursor();
         }
         if runtime.has_work() {
             Some(now)
         } else if self.pending && self.interactive {
-            self.deadline
+            Some(self.deadline.unwrap_or(now))
         } else {
             None
         }
     }
 
-    fn paint(&mut self) -> Vec<u8> {
-        let mut frame = self.runtime.as_mut().unwrap().paint();
-        let mut bytes = Vec::new();
-        if self.interactive {
-            if self.alternate {
-                // Ink fullStaticOutput resets on identity changes. Copy at most
-                // one viewport of history, not the accumulated transcript.
-                if frame.static_changed {
-                    self.static_rows.clear();
-                }
-                self.static_rows.append(&mut frame.static_lines);
-                let start = self.static_rows.len().saturating_sub(self.rows);
-                let mut live = self.static_rows[start..].to_vec();
-                live.append(&mut frame.live);
-                frame.live = live;
-            }
-            // Ink renderInteractiveFrame never treats piped output as fullscreen.
-            let rows = if self.tty { self.rows } else { usize::MAX };
-            self.output
-                .render(&frame, None, self.columns, rows, &mut bytes);
-        } else {
-            for row in &frame.static_lines {
-                bytes.extend_from_slice(serialize_row(row).as_bytes());
-                bytes.push(b'\n');
-            }
-        }
+    fn paint(&mut self) {
+        let runtime = self.runtime.as_mut().unwrap();
+        let frame = runtime.paint();
+        self.destination.borrow_mut().paint(frame, runtime.cursor());
         self.pending = false;
-        bytes
-    }
-
-    fn write(&mut self, mut bytes: Vec<u8>) {
-        if bytes.is_empty() {
-            return;
-        }
-        if self.interactive && self.tty {
-            synchronize(&mut bytes);
-        }
-        self.terminal.write(&bytes);
     }
 
     pub(crate) fn clear(&mut self) {
-        if self.interactive && self.runtime.is_some() {
-            let mut bytes = Vec::new();
-            self.output.clear(&mut bytes);
-            self.write(bytes);
+        if self.runtime.is_some() {
+            self.destination.borrow_mut().clear();
         }
     }
 
@@ -197,7 +308,8 @@ impl App {
         if std::thread::panicking() {
             // Cleanup runs user code: a second panic aborts the process, so
             // restore before dropping the tree rather than Ink's normal order.
-            self.restore(Vec::new());
+            self.runtime.as_ref().unwrap().begin_unmount();
+            self.destination.borrow_mut().restore(Vec::new());
             drop(self.runtime.take());
             return;
         }
@@ -210,8 +322,7 @@ impl App {
         }
         if self.interactive {
             if self.pending {
-                let bytes = self.paint();
-                self.write(bytes);
+                self.paint();
             }
         } else {
             let frame = self.runtime.as_mut().unwrap().paint();
@@ -220,7 +331,7 @@ impl App {
                 static_output.extend_from_slice(serialize_row(row).as_bytes());
                 static_output.push(b'\n');
             }
-            self.write(static_output);
+            self.destination.borrow_mut().write(static_output);
             final_output = frame
                 .live
                 .iter()
@@ -231,25 +342,14 @@ impl App {
             final_output.push(b'\n');
         }
         let runtime = self.runtime.as_mut().unwrap();
+        runtime.begin_unmount();
         if committed {
             runtime.passive_effects();
         }
         runtime.after_write();
         // Ink finishUnmount restores the terminal after React cleanups.
         drop(self.runtime.take());
-        self.restore(final_output);
-    }
-
-    fn restore(&mut self, mut final_output: Vec<u8>) {
-        if self.alternate {
-            final_output.extend_from_slice(b"\x1b[?1049l\x1b[?25h");
-            self.terminal.write(&final_output);
-        } else {
-            if self.interactive {
-                self.output.done(&mut final_output);
-            }
-            self.write(final_output);
-        }
+        self.destination.borrow_mut().restore(final_output);
     }
 }
 

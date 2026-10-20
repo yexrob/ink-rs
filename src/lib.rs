@@ -38,7 +38,10 @@ pub use color::{Color, ColorLevel, ParseColorError};
 pub use components::{Newline, Spacer, Static, Text, Transform, View};
 pub use element::{Element, Key, TextChild};
 pub use render::{RenderOptions, render_to_string};
-pub use runtime::{ElementMetrics, NodeRef, Scope, State, component, measure_element};
+pub use runtime::{
+    CursorPosition, ElementMetrics, NodeRef, OutputStream, OutputWriter, Scope, State, component,
+    measure_element,
+};
 pub use style::{
     AlignContent, AlignItems, AlignSelf, Dimension, Display, FlexDirection, FlexWrap, Inset,
     JustifyContent, Overflow, Percent, Position, Style, Styled, TextWrap,

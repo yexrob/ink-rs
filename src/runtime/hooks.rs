@@ -2,6 +2,7 @@ use std::any::{Any, TypeId};
 use std::rc::Rc;
 
 use super::Dirty;
+use super::output::{CursorCleanup, CursorPosition, OutputStream, OutputWriter};
 use super::state::{ElementMetrics, NodeRef, State, StateSlot, Store};
 
 type Setup = Box<dyn FnOnce() -> Box<dyn Any>>;
@@ -13,6 +14,7 @@ pub(super) enum Kind {
     Memo(TypeId, TypeId),
     Effect(TypeId),
     LayoutEffect(TypeId),
+    InsertionEffect,
 }
 
 pub(super) struct Effect {
@@ -49,6 +51,47 @@ pub struct Scope<'a> {
 }
 
 impl Scope<'_> {
+    /// Declares the terminal cursor in cells relative to the live frame, below
+    /// Static output. `None` hides it. Each render commits this declaration;
+    /// a component that skips rendering retains its previous declaration.
+    /// Unmount clears the shared cursor. Debug and string rendering ignore it.
+    pub fn use_cursor(&mut self, position: Option<CursorPosition>) {
+        let index = self.position(Kind::InsertionEffect);
+        let store = self.store.clone();
+        let setup: Setup = Box::new(move || {
+            store.cursor.set(position);
+            Box::new(CursorCleanup(store))
+        });
+        // Ink useCursor uses an insertion effect without dependencies.
+        if let Some(Hook {
+            value: Value::Effect(effect),
+            ..
+        }) = self.hooks.get_mut(index)
+        {
+            effect.setup = Some(setup);
+        } else {
+            self.hooks.push(Hook {
+                kind: Kind::InsertionEffect,
+                value: Value::Effect(Effect {
+                    deps: Box::new(()),
+                    setup: Some(setup),
+                    cleanup: None,
+                }),
+            });
+        }
+    }
+
+    /// Returns a writer for stdout. Writes preserve the last painted frame and
+    /// do not wait for the frame throttle. No stream object is exposed.
+    pub fn use_stdout(&mut self) -> OutputWriter {
+        OutputWriter::new(self.store, OutputStream::Stdout)
+    }
+
+    /// Returns a writer for stderr, with the same timing as [`Scope::use_stdout`].
+    pub fn use_stderr(&mut self) -> OutputWriter {
+        OutputWriter::new(self.store, OutputStream::Stderr)
+    }
+
     /// Creates a stable ref to bind with [`crate::View::node_ref`].
     /// Its metrics remain zero until the bound View commits layout.
     pub fn use_node_ref(&mut self) -> NodeRef {

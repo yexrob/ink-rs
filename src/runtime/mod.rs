@@ -18,12 +18,15 @@ use hooks::{Hook, Kind, Value};
 use state::{RenderGuard, Store};
 
 mod hooks;
+mod output;
 mod state;
 
 #[cfg(test)]
 mod tests;
 
 pub use hooks::Scope;
+pub(crate) use output::WriteDestination;
+pub use output::{CursorPosition, OutputStream, OutputWriter};
 pub use state::{ElementMetrics, NodeRef, State, measure_element};
 
 trait RenderComponent {
@@ -125,6 +128,7 @@ impl Dirty {
 
 #[derive(Default)]
 struct Cleanups {
+    insertion: Vec<Box<dyn Any>>,
     refs: Vec<(NodeId, Option<NodeRef>)>,
     layout: Vec<Box<dyn Any>>,
     passive: Vec<Box<dyn Any>>,
@@ -143,6 +147,7 @@ struct Instance {
     host: Option<NodeId>,
     node_ref: Option<NodeRef>,
     hooks: Vec<Hook>,
+    insertion_deletions: Vec<Box<dyn Any>>,
     rendered: bool,
     dirty: Rc<Dirty>,
     background: Option<Color>,
@@ -161,6 +166,7 @@ impl Instance {
             host: None,
             node_ref: None,
             hooks: Vec::new(),
+            insertion_deletions: Vec::new(),
             rendered: false,
             dirty: Dirty::new(parent),
             background: None,
@@ -179,6 +185,7 @@ impl Instance {
     }
 
     fn retire(&mut self, cleanups: &mut Cleanups) {
+        cleanups.insertion.append(&mut self.insertion_deletions);
         self.dirty.mounted.set(false);
         if self.node_ref.take().is_some() {
             cleanups.refs.push((self.host.expect("ref host"), None));
@@ -191,7 +198,9 @@ impl Instance {
                 Value::State { slot, .. } => cleanups.states.push(Box::new(slot)),
                 Value::Effect(mut effect) => {
                     if let Some(cleanup) = effect.cleanup.take() {
-                        if matches!(hook.kind, Kind::LayoutEffect(_)) {
+                        if hook.kind == Kind::InsertionEffect {
+                            cleanups.insertion.push(cleanup);
+                        } else if matches!(hook.kind, Kind::LayoutEffect(_)) {
                             cleanups.layout.push(cleanup);
                         } else {
                             cleanups.passive.push(cleanup);
@@ -212,7 +221,8 @@ impl Instance {
             child.collect_cleanups(layout, cleanups);
         }
         for hook in &mut self.hooks {
-            if matches!(hook.kind, Kind::LayoutEffect(_)) == layout
+            if hook.kind != Kind::InsertionEffect
+                && matches!(hook.kind, Kind::LayoutEffect(_)) == layout
                 && let Value::Effect(effect) = &mut hook.value
                 && effect.setup.is_some()
                 && let Some(cleanup) = effect.cleanup.take()
@@ -228,10 +238,29 @@ impl Instance {
             child.effects(layout);
         }
         for hook in &mut self.hooks {
-            if matches!(hook.kind, Kind::LayoutEffect(_)) == layout
+            if hook.kind != Kind::InsertionEffect
+                && matches!(hook.kind, Kind::LayoutEffect(_)) == layout
                 && let Value::Effect(effect) = &mut hook.value
                 && let Some(setup) = effect.setup.take()
             {
+                effect.cleanup = Some(setup());
+            }
+        }
+    }
+
+    fn insertion_effects(&mut self) {
+        // React commitMutationEffectsOnFiber: deletions at this parent, then
+        // children, then this fiber's insertion cleanup and setup together.
+        drain(&mut self.insertion_deletions);
+        for child in &mut self.children {
+            child.insertion_effects();
+        }
+        for hook in &mut self.hooks {
+            if hook.kind == Kind::InsertionEffect
+                && let Value::Effect(effect) = &mut hook.value
+                && let Some(setup) = effect.setup.take()
+            {
+                drop(effect.cleanup.take());
                 effect.cleanup = Some(setup());
             }
         }
@@ -338,6 +367,19 @@ impl Runtime {
         self.next = Some(Element::fragment([element]));
     }
 
+    pub(crate) fn set_destination(&mut self, destination: Rc<dyn WriteDestination>) {
+        *self.instance.store.destination.borrow_mut() = Some(destination);
+    }
+
+    pub(crate) fn cursor(&self) -> Option<CursorPosition> {
+        self.instance.store.cursor.get()
+    }
+
+    pub(crate) fn begin_unmount(&self) {
+        // Ink sets isUnmounted before React runs teardown cleanups.
+        self.instance.store.unmounting.set(true);
+    }
+
     pub(crate) fn render_if_due(
         &mut self,
         now: Instant,
@@ -372,6 +414,7 @@ impl Runtime {
                 );
                 order_children(&mut self.tree, self.root, &self.instance.children);
             }
+            self.instance.insertion_effects();
             // React commitMutationEffects detaches old refs before
             // commitLayoutEffects attaches refs and runs layout effects.
             for (node, _) in &self.cleanups.refs {
@@ -469,6 +512,7 @@ impl Runtime {
         if self.instance.pending_static {
             self.instance
                 .finish_static(&mut self.tree, &mut self.cleanups);
+            drain(&mut self.cleanups.insertion);
             for (node, _) in self.cleanups.refs.drain(..) {
                 if let Some(node_ref) = self.refs.remove(&usize::from(node)) {
                     node_ref.refresh(ElementMetrics::default());
@@ -485,7 +529,9 @@ impl Runtime {
 
 impl Drop for Runtime {
     fn drop(&mut self) {
+        self.begin_unmount();
         self.instance.retire(&mut self.cleanups);
+        drain(&mut self.cleanups.insertion);
         drain(&mut self.cleanups.layout);
         drain(&mut self.cleanups.passive);
         drain(&mut self.cleanups.states);
@@ -533,6 +579,7 @@ fn reconcile_children(
             });
             if child.as_ref().is_some_and(|child| !child.matches(&element)) {
                 remove(child.as_mut().unwrap(), tree, cleanups);
+                instance.insertion_deletions.append(&mut cleanups.insertion);
                 child = None;
             }
             let child = child.unwrap_or_else(|| {
@@ -557,6 +604,7 @@ fn reconcile_children(
         }
         for child in &mut instance.children[length..] {
             remove(child, tree, cleanups);
+            instance.insertion_deletions.append(&mut cleanups.insertion);
             changed = true;
         }
         instance.children.truncate(length);

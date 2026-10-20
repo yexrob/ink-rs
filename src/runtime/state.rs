@@ -7,6 +7,7 @@ use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::Dirty;
+use super::output::{CursorPosition, WriteDestination};
 
 /// Committed layout in integer cells, relative to the live tree's root.
 /// Coordinates exclude scrolling offsets and terminal viewport placement.
@@ -89,6 +90,17 @@ thread_local! {
 }
 static NEXT_RUNTIME: AtomicU64 = AtomicU64::new(1);
 
+pub(super) fn resolve_store(id: u64) -> Option<Rc<Store>> {
+    REGISTRY.with(|registry| registry.borrow().get(&id).and_then(Weak::upgrade))
+}
+
+pub(super) fn assert_not_rendering() {
+    debug_assert!(
+        RENDER_DEPTH.with(|depth| depth.get() == 0),
+        "state and output writes during render are forbidden"
+    );
+}
+
 pub(super) struct RenderGuard;
 
 impl RenderGuard {
@@ -116,6 +128,9 @@ struct StateValue {
 
 pub(super) struct Store {
     pub(super) id: u64,
+    pub(super) cursor: Cell<Option<CursorPosition>>,
+    pub(super) destination: RefCell<Option<Rc<dyn WriteDestination>>>,
+    pub(super) unmounting: Cell<bool>,
     slots: RefCell<Vec<Slot>>,
     free: RefCell<Vec<usize>>,
 }
@@ -141,6 +156,9 @@ impl Store {
     pub(super) fn new() -> Rc<Self> {
         let store = Rc::new(Self {
             id: NEXT_RUNTIME.fetch_add(1, Ordering::Relaxed),
+            cursor: Cell::new(None),
+            destination: RefCell::new(None),
+            unmounting: Cell::new(false),
             slots: RefCell::new(Vec::new()),
             free: RefCell::new(Vec::new()),
         });
@@ -213,8 +231,7 @@ impl<T> Clone for State<T> {
 
 impl<T: 'static> State<T> {
     fn resolve(self) -> Option<Rc<StateValue>> {
-        let store = REGISTRY
-            .with(|registry| registry.borrow().get(&self.runtime).and_then(Weak::upgrade))?;
+        let store = resolve_store(self.runtime)?;
         let slots = store.slots.borrow();
         let slot = slots.get(self.slot)?;
         (slot.generation == self.generation)
@@ -239,7 +256,7 @@ impl<T: 'static> State<T> {
     where
         T: PartialEq,
     {
-        Self::assert_not_rendering();
+        assert_not_rendering();
         let Some(value) = self.resolve() else { return };
         // The slot outlives unmount until passive cleanups have run; React
         // ignores updates to unmounted components.
@@ -259,7 +276,7 @@ impl<T: 'static> State<T> {
 
     /// Mutates the value and schedules its owner, without an equality check.
     pub fn update(self, f: impl FnOnce(&mut T)) {
-        Self::assert_not_rendering();
+        assert_not_rendering();
         let Some(value) = self.resolve() else { return };
         if !value.dirty.mounted.get() {
             return;
@@ -270,12 +287,5 @@ impl<T: 'static> State<T> {
             .borrow_mut()
             .downcast_mut::<T>()
             .expect("state type"));
-    }
-
-    fn assert_not_rendering() {
-        debug_assert!(
-            RENDER_DEPTH.with(|depth| depth.get() == 0),
-            "state writes during render are forbidden"
-        );
     }
 }

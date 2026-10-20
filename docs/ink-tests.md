@@ -42,9 +42,9 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `component-regressions.tsx` | 4 | M1 | 2 | `tests/component_regressions.rs` |
 | `components.tsx` | 93 | M0 / M1 / M2 | 63 | `tests/components.rs` |
 | `content-offset.tsx` | 23 | M0 | 24 | `tests/content_offset.rs` |
-| `cursor-exit-position.tsx` | 6 | M2 |  |  |
-| `cursor-helpers.tsx` | 17 | M2 |  |  |
-| `cursor.tsx` | 20 | M2 |  |  |
+| `cursor-exit-position.tsx` | 6 | M2 | 3 | `tests/cursor_exit_position.rs`、`src/output/tests/cursor_exit_position.rs` |
+| `cursor-helpers.tsx` | 17 | — | 0 | 不适用，cell diff 没有对应内部函数 |
+| `cursor.tsx` | 20 | M2 / M3 | 10 | `tests/cursor.rs` |
 | `display.tsx` | 6 | M0 / M1 | 4 | `tests/display.rs` |
 | `error-overview.tsx` | 7 | M4 |  |  |
 | `errors.tsx` | 8 | M4 |  |  |
@@ -66,7 +66,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `hooks-use-input-navigation.tsx` | 18 | M3 |  |  |
 | `hooks-use-input.tsx` | 34 | M3 |  |  |
 | `hooks-use-paste.tsx` | 4 | M3 |  |  |
-| `hooks.tsx` | 6 | M3 |  |  |
+| `hooks.tsx` | 6 | M2 / M3 | 2 | `tests/hooks.rs` |
 | `input-buffered-ctrl-c.tsx` | 5 | M3 |  |  |
 | `input-keypad-enter.tsx` | 2 | M3 |  |  |
 | `input-parser.ts` | 65 | M3 |  |  |
@@ -74,7 +74,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `issue-973-static-commit.tsx` | 1 | M2 | 1 | `tests/issue_973_static_commit.rs` |
 | `kitty-keyboard.tsx` | 77 | M3 |  |  |
 | `kitty-negotiation.tsx` | 5 | M3 |  |  |
-| `line-update.ts` | 29 | M2 |  |  |
+| `line-update.ts` | 29 | — | 0 | 不适用，cell diff 没有对应内部函数 |
 | `log-update-blank-growth.ts` | 4 | M2 | 4 | `src/output/tests/log_update_blank_growth.rs` |
 | `log-update-columns.tsx` | 8 | M2 | 3 | `src/output/tests/log_update_columns.rs` |
 | `log-update-sparse.ts` | 9 | M2 | 8 | `src/output/tests/log_update_sparse.rs` |
@@ -90,7 +90,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `reconciler.tsx` | 14 | M1 | 7 | `tests/reconciler.rs` |
 | `render-callback.tsx` | 4 | — | 0 | 缺 API / 不适用，见下文 |
 | `render-to-string.tsx` | 37 | M0 / M1 | 32 | `tests/render_to_string.rs` |
-| `render.tsx` | 119 | M2 | 27 | `tests/render.rs` |
+| `render.tsx` | 119 | M2 | 28 | `tests/render.rs` |
 | `rendering-regressions.tsx` | 2 | M0 | 2 | `tests/rendering_regressions.rs` |
 | `rerender-input.tsx` | 4 | M3 |  |  |
 | `sanitize-ansi.ts` | 50 | M0 | 50 | `src/text/sanitize/tests.rs` |
@@ -245,6 +245,24 @@ Ink 有 95 个测试文件、1,646 个测试。
 - `log-update-sparse.ts`：不适用：`the screen reducer preserves skipped cells until they are erased`，它测的是 Ink 的测试辅助函数 `reconstructTerminalLines`。
 - `log-update-blank-growth.ts`、`issue-973-static-commit.tsx`：无，文件中的测试已移植。
 
+### `cursor.tsx`
+
+- 重复，`incrementalRendering` 变体：`memoized cursor survives sibling updates (incremental: true)`、`incremental rendering - fullscreen: cursor lands on the requested row across rerender and cursor-only update`、`incremental rendering - fullscreen: cursor lands on the requested row on the sync path`。
+- M3，调用 `useInput` 或发送输入：`cursor is shown at specified position after render`、`cursor is not hidden by useEffect after first render`、`cursor follows text input`、`cursor moves on space input even when output is identical`、`cursor is cleared when component using useCursor unmounts`、`screen does not scroll up on subsequent renders`。
+- 不适用，Suspense / concurrent：`cursor position does not leak from suspended concurrent render to fallback`。
+
+### `cursor-exit-position.tsx`
+
+- 重复，`incrementalRendering` 变体：`unmount returns a positioned cursor below the frame (incremental: true)`、`done returns the cursor once without erasing output (incremental: true)`、`alternate-screen exit does not reposition the primary cursor (incremental: true)`。
+
+### `hooks.tsx`
+
+- M3，输入：`useInput - ignore input if not active`、``useInput - handle Ctrl+C when `exitOnCtrlC` is `false` ``、`useInput - no MaxListenersExceededWarning with many useInput hooks`、``useInput - handle Ctrl+C via kitty protocol when `exitOnCtrlC` is `false` ``。
+
+### `cursor-helpers.tsx`、`line-update.ts`
+
+- 不适用，分别全部 17 个和 29 个测试：它们测试 Ink 的光标序列辅助函数和按行前缀更新函数，cell diff 没有对应内部函数。光标位置、显隐、退出与外部写后的屏幕由 Output 和 app 测试覆盖。
+
 ### `render.tsx`
 
 - 不适用，Node stream、JS undefined 或 ref/unref：`accepts standard Node streams without stream-specific assertions`、`handles input without requiring process ref methods`、`undefined stream options use the default streams`。
@@ -310,7 +328,8 @@ Ink 有 95 个测试文件、1,646 个测试。
 
 ## 与 Ink 测试的差异
 
-- **app 高度上限。** `render.tsx` 的 `growing into an overflowing frame keeps <Static> rows that are still in the viewport - standard` 保留 History、S1–S3 和 `live 2 tick 1` 至 `live 4 tick 1`；顶部被裁掉的 `live 0`、`live 1` 不进入 scrollback。`alternate screen replays <Static> items added while the frame overflows once - standard` 的溢出阶段不输出被裁掉的 Static 行，检查可见屏幕无 Static；收缩后保留原期望 `S1, S2, S3, live 0 tick 3, 空行`。两者由 design.md 的屏高上限决定。
+- **app 高度上限。** `render.tsx` 的 `growing into an overflowing frame keeps <Static> rows that are still in the viewport - standard` 保留 History、S1–S3 和 `live 2 tick 1` 至 `live 4 tick 1`；顶部被裁掉的 `live 0`、`live 1` 不进入 scrollback。`alternate screen replays <Static> items added while the frame overflows once - standard` 的溢出阶段不输出被裁掉的 Static 行，检查可见屏幕无 Static；收缩后保留原期望 `S1, S2, S3, live 0 tick 3, 空行`。`cursor.tsx` 的 `standard rendering - fullscreen: cursor lands on the requested row on the sync path` 在 5 行终端中裁掉 6 行帧的 `Line 0`，可见 `Line 1!` 至 `Line 5`，声明 `(x=3,y=2)` 落到视口 `(row=1,column=3)`；不清屏，裁掉的行不进 scrollback，代替 Ink 的清屏与 cursorUp 字节断言。这些行为由 design.md 的屏高上限决定。
+- **cursor 与 hooks 的观测边界。** `cursor.tsx` 的 memo、stdout/stderr 写入和满屏更新测试把 hide/show 顺序与 cursorUp + cursorTo 字节改为 vt100 的光标行、列、可见性；memo 的卸载分支保留 hide 存在且 show 不存在的字节断言。`cursor-exit-position.tsx` 的 `done returns the cursor once without erasing output` 改为屏幕内容、光标在帧下方和第二次 done 无字节；备用屏退出检查主屏、光标、可见性，并保留退出序列之后只有 show 的字节断言。`hooks.tsx` 在进程内重建 fixture，将两个流按写入顺序喂给同一个 vt100 屏幕，卸载后添加 `exited`；stdout 的 stripAnsi/换行切分改为屏幕行比较。debug 用例保留数据和重放内容的期望。`render.tsx` 的同步序列用例检查初帧包装，重渲染后无新 write。
 - **app 的观测边界。** 按移植范围，整屏清除次数、按清屏序列切帧的部分改为 vt100 屏幕观测；零整屏清除断言检查 `CSI 2J`、`CSI 3J`、`CSI 1;1H CSI J` 均未出现。`render all frames when interactive is explicitly true` 按每帧屏幕验证 Count 0–2，cell diff 不重写 Count 前缀。`side-by-side public components do not rewrite the unchanged left region` 检查左侧区域未重写及屏幕中的计数；不是锁定 Ink 的 CHA + EL。`no throttled renders after unmount` 的卸载消耗 TestApp，没有卸载后的 tick。以上不改变 Ink 的内容期望。
 - **log-update 的测试检查屏幕。** 移植版把输出的字节交给 vt100，检查屏幕、scrollback、光标的位置和可见性，以及没有写出字节。Ink 锁定字节的断言（`eraseLines` 的行数、`ESC E` 等）改为检查这些字节产生的屏幕。vt100 在待换行状态下执行 EL 不擦最后一格，xterm 会擦，所以 `full-width updates do not erase after the last character` 还检查字节：满宽的行之后没有 EL。
 - **视口高度代替末尾换行。** Ink 的 log-update 测试为每帧选择是否带末尾换行，ink-rs 由视口高度决定：帧高达到屏高时不带。移植版为每个测试选视口高度，让被断言的帧停在 Ink 的位置。`incremental rendering - no trailing newline: shrink` 从满屏缩短，两帧无法同时对上：缩短后光标按 design.md 停在帧的下一行，Ink 的测试停在帧的最后一行。Ink 的公开 render 退出满屏后，光标也停在帧的下一行。

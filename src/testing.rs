@@ -5,10 +5,10 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use crate::app::{App, resolve_interactive};
-use crate::paint::serialize_row;
-use crate::runtime::Runtime;
+use crate::paint::{Frame, serialize_row};
+use crate::runtime::{Runtime, WriteDestination};
 use crate::terminal::Terminal;
-use crate::{ColorLevel, Element, Options, RenderOptions};
+use crate::{ColorLevel, Element, Options, OutputStream, RenderOptions};
 
 /// Mounts at 100 columns with basic colors, matching Ink's debug test helper.
 pub fn render(element: impl Into<Element>) -> TestInstance {
@@ -24,10 +24,14 @@ pub fn render(element: impl Into<Element>) -> TestInstance {
 /// Mounts with the given options and presents one frame.
 /// Passive-effect state updates remain pending until [`TestInstance::settle`].
 pub fn render_with(element: impl Into<Element>, options: RenderOptions) -> TestInstance {
+    let destination = Rc::new(RefCell::new(DebugOutput::default()));
+    let mut runtime = Runtime::new(element.into(), options);
+    runtime.set_destination(destination.clone());
     let mut instance = TestInstance {
-        runtime: Runtime::new(element.into(), options),
+        runtime,
+        destination,
         frames: Vec::new(),
-        static_output: String::new(),
+        stderr: Vec::new(),
     };
     instance.step();
     instance
@@ -36,23 +40,81 @@ pub fn render_with(element: impl Into<Element>, options: RenderOptions) -> TestI
 /// A tree that retains state across frames. Dropping it runs unmount cleanups.
 pub struct TestInstance {
     runtime: Runtime,
+    destination: Rc<RefCell<DebugOutput>>,
     frames: Vec<String>,
+    stderr: Vec<String>,
+}
+
+// Entries wait here until the step that produced them returns; a write made
+// outside a step appears at the next one.
+#[derive(Default)]
+struct DebugOutput {
+    frames: Vec<String>,
+    stderr: Vec<String>,
     static_output: String,
+    live: String,
+}
+
+impl DebugOutput {
+    fn paint(&mut self, frame: Frame) {
+        // Ink handleStaticChange resets history before onRender appends it.
+        if frame.static_changed {
+            self.static_output.clear();
+        }
+        for row in &frame.static_lines {
+            self.static_output.push_str(&serialize_row(row));
+            // renderer.ts preserves the newline even for a blank Static row.
+            self.static_output.push('\n');
+        }
+        self.live = frame
+            .live
+            .iter()
+            .map(|row| serialize_row(row))
+            .collect::<Vec<_>>()
+            .join("\n");
+        self.frames
+            .push(format!("{}{}", self.static_output, self.live));
+    }
+}
+
+impl WriteDestination for RefCell<DebugOutput> {
+    fn write(&self, stream: OutputStream, data: &str) {
+        let mut output = self.borrow_mut();
+        // Ink writeToStdout/writeToStderr debug branches replay the last frame.
+        let prefix = match stream {
+            OutputStream::Stdout => data,
+            OutputStream::Stderr => {
+                output.stderr.push(data.to_owned());
+                ""
+            }
+        };
+        let frame = format!("{prefix}{}{}", output.static_output, output.live);
+        output.frames.push(frame);
+    }
 }
 
 impl TestInstance {
-    /// The last presented frame: accumulated Static rows, each followed by a
-    /// newline, then live rows joined by newlines, matching Ink's debug output.
+    /// The last debug stdout entry, from a present or an external write.
+    /// Entries contain accumulated Static rows and the last live output;
+    /// stdout writes prefix their data, while stderr writes replay the frame.
     /// Static history resets when the first Static instance changes.
     pub fn last_frame(&self) -> &str {
-        self.frames.last().map_or("", String::as_str)
+        self.frames().last().map_or("", String::as_str)
     }
 
-    /// One debug-output frame per present, including unchanged output. Each
-    /// contains accumulated Static rows and their newlines before the live rows.
-    /// Static history resets when the first Static instance changes.
+    /// Debug stdout entries in write order, including unchanged presents and
+    /// external-write replays. Each contains accumulated Static rows before
+    /// the last live output; stdout writes also prefix their data. A write
+    /// made outside a step, through a retained writer, appears after the next
+    /// step.
     pub fn frames(&self) -> &[String] {
         &self.frames
+    }
+
+    /// External stderr writes in write order, without frame replay or newline
+    /// conversion.
+    pub fn stderr(&self) -> &[String] {
+        &self.stderr
     }
 
     /// Reconciles a new root against the mounted tree and runs one pass.
@@ -72,31 +134,20 @@ impl TestInstance {
     }
 
     fn step(&mut self) -> Option<Instant> {
-        self.runtime.render_if_due(Instant::now(), |frame| {
-            // Ink handleStaticChange resets history before onRender appends it.
-            if frame.static_changed {
-                self.static_output.clear();
-            }
-            for row in &frame.static_lines {
-                self.static_output.push_str(&serialize_row(row));
-                // renderer.ts preserves the newline even for a blank Static row.
-                self.static_output.push('\n');
-            }
-            let live = frame
-                .live
-                .iter()
-                .map(|row| serialize_row(row))
-                .collect::<Vec<_>>()
-                .join("\n");
-            self.frames.push(format!("{}{live}", self.static_output));
-        })
+        let due = self.runtime.render_if_due(Instant::now(), |frame| {
+            self.destination.borrow_mut().paint(frame);
+        });
+        let mut output = self.destination.borrow_mut();
+        self.frames.append(&mut output.frames);
+        self.stderr.append(&mut output.stderr);
+        due
     }
 }
 
-/// In-memory stdout. Clones share the write log.
+/// In-memory terminal. Clones share an ordered log of stdout and stderr writes.
 #[derive(Clone)]
 pub struct TestTerminal {
-    writes: Rc<RefCell<Vec<String>>>,
+    writes: Rc<RefCell<Vec<(OutputStream, String)>>>,
     size: Option<(u16, u16)>,
     tty: bool,
 }
@@ -123,18 +174,49 @@ impl TestTerminal {
         self
     }
 
-    /// Returns one string per terminal write.
+    /// Returns one string per stdout write, in write order.
     pub fn writes(&self) -> Vec<String> {
+        self.stream_writes(OutputStream::Stdout)
+    }
+
+    /// Returns one string per stderr write, in write order.
+    pub fn stderr(&self) -> Vec<String> {
+        self.stream_writes(OutputStream::Stderr)
+    }
+
+    /// Returns both streams in write order, as on a shared PTY.
+    pub fn output(&self) -> Vec<(OutputStream, String)> {
         self.writes.borrow().clone()
     }
 
-    /// Writes existing terminal history before mounting an app.
+    fn stream_writes(&self, stream: OutputStream) -> Vec<String> {
+        self.writes
+            .borrow()
+            .iter()
+            .filter(|(target, _)| *target == stream)
+            .map(|(_, data)| data.clone())
+            .collect()
+    }
+
+    /// Writes stdout bytes, such as shell history before mount or a prompt
+    /// after unmount.
     pub fn write(&self, text: &str) {
-        self.writes.borrow_mut().push(text.to_owned());
+        self.writes
+            .borrow_mut()
+            .push((OutputStream::Stdout, text.to_owned()));
     }
 }
 
 impl Terminal for TestTerminal {
+    fn write_stderr(&mut self, bytes: &[u8]) {
+        self.writes.borrow_mut().push((
+            OutputStream::Stderr,
+            std::str::from_utf8(bytes)
+                .expect("terminal output is UTF-8")
+                .to_owned(),
+        ));
+    }
+
     fn write(&mut self, bytes: &[u8]) {
         TestTerminal::write(
             self,

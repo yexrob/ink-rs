@@ -3,6 +3,7 @@ use crate::app::synchronize;
 use crate::paint::{Cell, Frame};
 use crate::text::styled;
 
+mod cursor_exit_position;
 mod log_update;
 mod log_update_blank_growth;
 mod log_update_columns;

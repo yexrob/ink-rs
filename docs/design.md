@@ -32,7 +32,7 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
 | runtime | 组件实例树、按调用顺序存放的 hooks、按 key 比对、调度、effect | `reconciler.ts` |
 | host | 节点存储：View / Text / Static / Transform。自有节点树，实现 taffy 的底层布局 trait，跨帧常驻。Text 里嵌套的 Text、Transform、组件构成行内树，挂在 Text 节点上，taffy 看到的是一个叶子 | `dom.ts` |
 | layout + text | taffy 布局；文本解析、测量、换行、截断、宽字符 | `styles.ts`、`wrap-text.ts` … |
-| paint | 纯函数：节点树 → `Frame`（网格、新增的 Static 行、光标位置），含边框、背景、裁剪、Transform。每帧整帧重画 | `render-node-to-output.ts`、`output.ts` |
+| paint | 纯函数：节点树 → `Frame`（网格、新增的 Static 行），含边框、背景、裁剪、Transform。每帧整帧重画；光标意图保存在 runtime 的提交状态，由 app 随帧交给 output | `render-node-to-output.ts`、`output.ts` |
 | output | 单元格 diff、Static、光标、擦除与结束帧字节 | `log-update.ts`、`ink.tsx` |
 | Terminal | 写字节、取尺寸、切换模式 | — |
 
@@ -132,9 +132,11 @@ M0 的 API（`src/lib.rs`）：
 - **光标停留的位置**同 Ink：帧比屏幕矮时停在帧下一行的行首；帧高达到屏高时停在最后一行，不写末尾的换行。退出时光标移到帧下方，帧高达到屏高时补一个 `\r\n`，让 shell 提示符从新行开始（Ink 不补）。
 - **全屏模式**即备用屏，启动时由选项决定，运行中不切换。帧从屏幕第一行开始。Static 没有 scrollback 可去，同 Ink 保留全部条目，Static 身份改变时清空历史。每帧取历史末尾至多一个屏高的行，放在 live 行之前，交给 Output 裁剪、差分，不整屏清除，不复制全部历史。
 - **resize** 没有精确解法，各家终端重排行为不同。M2 照 Ink 的规则：宽度变小时按逻辑行擦掉上一帧后重画；高度变小且上一帧占满屏幕时清掉可见区（`CSI 1;1H CSI J`）重画；其余情况走 diff。在真实终端上测过之后再调。
-- **光标**对应 Ink 的 `useCursor`：组件声明光标位置，每帧结束后把真实光标移过去，输入法候选框靠它定位。同 Ink，首帧起隐藏光标；声明了位置时移过去并显示，下一帧开头先隐藏。
+- **光标**对应 Ink 的 `useCursor`：组件在 render 调用 `Scope::use_cursor(Option<CursorPosition>)`，`CursorPosition { x: usize, y: usize }` 是从 0 开始的整数格，原点为 Static 下方 live 帧的左上角；`None` 隐藏。备用屏把 Static 历史放在 live 前交给 Output 时，app 给 y 加上本次重放的 Static 行数；Output 按高度上限减去裁掉的顶部行数，并把越界坐标限制在可见帧内。runtime 使用内部 insertion effect，每次组件渲染后提交；props 相等跳过渲染时保留上次位置。顺序同 React `commitMutationEffectsOnFiber`：本节点的删除清理、子节点、本节点的 insertion effect，最后执行的声明生效；卸载任一调用过此 hook 的组件会清空共享位置，不检查当前所有者。不公开 insertion-effect hook。光标随帧节流；帧和光标未变时不写字节，光标变化时写移动与显隐序列。非交互、`testing::render`、`render_to_string` 忽略光标。同 Ink，首帧起隐藏光标；声明了位置时移过去并显示，下一次写帧前隐藏，输入法候选框靠它定位。
 - **非 TTY / CI**：`interactive` 默认取"不在 CI 且 stdout 是 TTY"，选项可以覆盖，同 Ink。非交互时不刷新画面：提交时写新的 Static 条目，退出时写最后一帧加换行。挂载时读取一次尺寸，未知时用 80×24；根宽度为列数。非 TTY 被选项强制为交互模式时不裁剪高度，不视作满屏，不使用同步输出或备用屏。CI 与颜色环境检测归驱动，核心接收解析值。
-- **外部输出**：`use_stdout().write`、`use_stderr().write` 擦掉帧，写出内容，再重画最后一帧，同 Ink 的 `writeToStdout`。不捕获 `println!`：它直接写 fd 1，安全代码拦不住；UI 运行期间改用这两个 write。
+- **外部输出**：`Scope::use_stdout()`、`Scope::use_stderr()` 返回 `Copy` 的 UI 线程句柄 `OutputWriter`，提供 `write(&str)`，按 runtime id 经状态句柄共用的线程局部注册表找到驱动安装的 `WriteDestination`。render 中写入在 debug 构建下 panic；空字符串忽略；卸载完成最终绘制、开始树清理时关闭写入，清理中的写入丢弃。交互模式擦掉帧、写数据、重画最后绘制的帧及其光标，同 Ink 的 `writeToStdout` / `writeToStderr`；外部写不等窗口，不消费待绘制帧，不改窗口。stdout 用一次 write 发出 `[bsu] + clear + data + redraw + [esu]`；stderr 用 stdout 发出 `[bsu] + clear`、stderr 发出 data、stdout 发出 `redraw + [esu]`，同步序列的条件同帧输出。app 将输出状态与 Runtime 分开持有，执行用户 render、effect、cleanup 时不借用输出状态；layout effect 中的 write 在调用时到达终端，重画前一次绘制的帧，首帧绘制前没有帧可重画。非交互模式把数据原样写给目标流；`render_to_string` 没有目的地，丢弃写入。不捕获 `println!`：它直接写 fd 1，安全代码拦不住；UI 运行期间改用这两个 write。
+- **外部输出的换行**与 Ink 不同：交互模式把前一个字节不是 `\r` 的 `\n` 转成 `\r\n`，数据末尾不是 `\n` 时补 `\r\n`。crossterm 的 raw mode（M3）清除 `OPOST`，裸 `\n` 不会回到第 0 列；Node raw mode 保留 `ONLCR`。重画依赖 cell diff 的第 0 列起点，缺少结尾换行会覆盖数据。非交互和 debug 模式不转换数据。
+- **debug 外部输出**同 Ink：stdout write 向 `testing::render` 的 `frames()` 添加一项 `data + 累计 Static + 上次 live`；stderr write 向 `stderr()` 添加 data，再向 `frames()` 添加 `累计 Static + 上次 live`。顺序按写入时刻记录，每一步结束时并入 `frames()` / `stderr()`；在步进之外经保留的句柄写入的内容，下一步后出现。`TestTerminal::output()` 按写入顺序记录 stdout / stderr，`writes()` 与 `stderr()` 分流读取。
 - **恢复终端**：退出、panic、SIGINT / SIGTERM / SIGHUP 时显示光标、退出备用屏、把光标移到帧下方。信号先卸载、恢复，再按原信号退出，同 Ink 的 signal-exit。正常卸载先提交未完成工作、写待绘制帧，再运行树清理，最后恢复终端；无待绘制帧时不重画，因此 clear 后卸载不恢复内容。panic 中的 Drop 跳过提交和 paint，先恢复终端再运行清理，避免清理中的 panic 导致 abort 前终端未恢复。Ctrl+Z 挂起与 SIGCONT 后重画在 M4。
 
 ## 输入

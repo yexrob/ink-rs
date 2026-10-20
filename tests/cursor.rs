@@ -1,0 +1,264 @@
+//! Ported from ink test/cursor.tsx @ 26d2c3f.
+//! Cursor suffix and hide/show byte assertions use vt100 position/visibility.
+mod common;
+
+use std::cell::Cell;
+use std::time::Duration;
+
+use common::{Screen, assert_no_full_clear};
+use ink_rs::testing::{TestTerminal, mount, render};
+use ink_rs::*;
+
+thread_local! {
+    static CURSOR_RENDERS: Cell<usize> = const { Cell::new(0) };
+}
+
+fn cursor(cx: &mut Scope, _: &()) -> Element {
+    CURSOR_RENDERS.set(CURSOR_RENDERS.get() + 1);
+    cx.use_cursor(Some(CursorPosition { x: 2, y: 0 }));
+    Text::new("Input").into()
+}
+
+fn siblings(_: &mut Scope, status: &&str) -> Element {
+    View::new()
+        .flex_direction(FlexDirection::Column)
+        .child(component(cursor, ()))
+        .child(Text::new(*status))
+        .into()
+}
+
+fn flush(app: &mut testing::TestApp) {
+    app.advance(Duration::from_millis(34));
+}
+
+fn assert_cursor(terminal: &TestTerminal, rows: u16, y: u16, x: u16) {
+    let screen = Screen::new(terminal, 100, rows);
+    assert_eq!(screen.cursor(), (y, x));
+    assert!(screen.cursor_visible());
+}
+
+#[test]
+fn memoized_cursor_survives_sibling_updates_incremental_false() {
+    CURSOR_RENDERS.set(0);
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(
+        component(siblings, "Waiting"),
+        Options::default(),
+        &terminal,
+    );
+    assert_cursor(&terminal, 24, 0, 2);
+    app.rerender(component(siblings, "Ready"));
+    flush(&mut app);
+    assert_eq!(CURSOR_RENDERS.get(), 1);
+    assert_eq!(
+        &Screen::new(&terminal, 100, 24).rows()[..2],
+        ["Input", "Ready"]
+    );
+    assert_cursor(&terminal, 24, 0, 2);
+
+    let before = terminal.writes().len();
+    app.rerender(Text::new("Finished"));
+    flush(&mut app);
+    let output = terminal.writes()[before..].join("");
+    assert_eq!(Screen::new(&terminal, 100, 24).rows()[0], "Finished");
+    assert!(!Screen::new(&terminal, 100, 24).cursor_visible());
+    assert!(output.contains("\x1b[?25l"));
+    assert!(!output.contains("\x1b[?25h"));
+}
+
+fn write_with_cursor(cx: &mut Scope, stream: &OutputStream) -> Element {
+    cx.use_cursor(Some(CursorPosition { x: 2, y: 0 }));
+    let writer = match stream {
+        OutputStream::Stdout => cx.use_stdout(),
+        OutputStream::Stderr => cx.use_stderr(),
+    };
+    let stream = *stream;
+    cx.use_effect((), move || {
+        writer.write(match stream {
+            OutputStream::Stdout => "from stdout hook\n",
+            OutputStream::Stderr => "from stderr hook\n",
+        });
+    });
+    Text::new("Hello").into()
+}
+
+#[test]
+fn cursor_remains_visible_after_use_stdout_write() {
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(
+        component(write_with_cursor, OutputStream::Stdout),
+        Options::default(),
+        &terminal,
+    );
+    app.advance(Duration::from_millis(50));
+    assert!(terminal.writes().join("").contains("from stdout hook"));
+    assert_cursor(&terminal, 24, 1, 2);
+}
+
+#[test]
+fn cursor_remains_visible_after_use_stderr_write() {
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(
+        component(write_with_cursor, OutputStream::Stderr),
+        Options::default(),
+        &terminal,
+    );
+    app.advance(Duration::from_millis(50));
+    assert_eq!(terminal.stderr(), ["from stderr hook\r\n"]);
+    assert_cursor(&terminal, 24, 1, 2);
+}
+
+fn debug_write(cx: &mut Scope, &(stream, rerender): &(OutputStream, bool)) -> Element {
+    let text = cx.use_state(move || if rerender { "Initial" } else { "Hello" });
+    let writer = match stream {
+        OutputStream::Stdout => cx.use_stdout(),
+        OutputStream::Stderr => cx.use_stderr(),
+    };
+    cx.use_effect((), move || {
+        if rerender {
+            text.set("Updated");
+        }
+    });
+    let value = text.get();
+    cx.use_effect(value, move || {
+        if !rerender || value == "Updated" {
+            writer.write(match stream {
+                OutputStream::Stdout => "from stdout hook\n",
+                OutputStream::Stderr => "from stderr hook\n",
+            });
+        }
+    });
+    Text::new(value).into()
+}
+
+#[test]
+fn debug_mode_use_stdout_write_replays_latest_frame() {
+    let app = render(component(debug_write, (OutputStream::Stdout, false)));
+    assert!(
+        app.frames()
+            .iter()
+            .any(|s| s.contains("from stdout hook\nHello"))
+    );
+    assert!(!app.frames().iter().any(String::is_empty));
+}
+
+#[test]
+fn debug_mode_use_stdout_write_does_not_leak_into_stderr() {
+    let app = render(component(debug_write, (OutputStream::Stdout, false)));
+    assert!(
+        app.frames()
+            .iter()
+            .any(|s| s.contains("from stdout hook\nHello"))
+    );
+    assert!(app.stderr().is_empty());
+}
+
+#[test]
+fn debug_mode_use_stderr_write_replays_latest_frame_without_empty_writes() {
+    let app = render(component(debug_write, (OutputStream::Stderr, false)));
+    assert_eq!(app.stderr(), ["from stderr hook\n"]);
+    assert!(app.frames().len() > 1);
+    assert!(app.frames()[1..].iter().any(|s| s.contains("Hello")));
+    assert!(
+        !app.frames()[1..]
+            .iter()
+            .any(|s| s.contains("from stderr hook\n"))
+    );
+    assert!(!app.stderr().iter().any(|s| s.contains("Hello")));
+    assert!(!app.frames().iter().any(String::is_empty));
+    assert!(!app.stderr().iter().any(String::is_empty));
+}
+
+#[test]
+fn debug_mode_use_stdout_write_replays_rerendered_frame() {
+    let mut app = render(component(debug_write, (OutputStream::Stdout, true)));
+    app.settle();
+    assert!(
+        app.frames()
+            .iter()
+            .any(|s| s.contains("from stdout hook\nUpdated"))
+    );
+    assert!(
+        !app.frames()
+            .iter()
+            .any(|s| s.contains("from stdout hook\nInitial"))
+    );
+    assert!(!app.frames().iter().any(String::is_empty));
+}
+
+#[test]
+fn debug_mode_use_stderr_write_replays_rerendered_frame() {
+    let mut app = render(component(debug_write, (OutputStream::Stderr, true)));
+    app.settle();
+    assert_eq!(app.stderr(), ["from stderr hook\n"]);
+    assert!(
+        !app.stderr()
+            .iter()
+            .any(|s| s.contains("Updated") || s.contains("Initial"))
+    );
+    let later = &app.frames()[1..];
+    assert!(later.iter().any(|s| s.contains("Updated")));
+    assert!(
+        !later
+            .iter()
+            .any(|s| s.contains("Initial") || s.contains("from stderr hook\n"))
+    );
+    assert!(!app.frames().iter().any(String::is_empty));
+    assert!(!app.stderr().iter().any(String::is_empty));
+}
+
+fn fullscreen(cx: &mut Scope, &(lines, y, marker): &(usize, usize, &str)) -> Element {
+    cx.use_cursor(Some(CursorPosition { x: 3, y }));
+    View::new()
+        .flex_direction(FlexDirection::Column)
+        .children(
+            (0..lines).map(|i| Text::new(format!("Line {i}{}", if i == 1 { marker } else { "" }))),
+        )
+        .into()
+}
+
+#[test]
+fn standard_rendering_fullscreen_cursor_lands_on_the_requested_row_across_rerender_and_cursor_only_update()
+ {
+    let terminal = TestTerminal::new(100, 5);
+    let mut app = mount(
+        component(fullscreen, (5, 2, "")),
+        Options::default(),
+        &terminal,
+    );
+    assert_cursor(&terminal, 5, 2, 3);
+    app.rerender(component(fullscreen, (5, 2, "!")));
+    flush(&mut app);
+    assert_eq!(
+        Screen::new(&terminal, 100, 5).rows(),
+        ["Line 0", "Line 1!", "Line 2", "Line 3", "Line 4"]
+    );
+    assert_cursor(&terminal, 5, 2, 3);
+    let before = terminal.writes().len();
+    app.rerender(component(fullscreen, (5, 0, "!")));
+    flush(&mut app);
+    assert_cursor(&terminal, 5, 0, 3);
+    assert!(!terminal.writes()[before..].join("").contains("Line"));
+    assert!(Screen::new(&terminal, 100, 5).scrollback().is_empty());
+}
+
+#[test]
+fn standard_rendering_fullscreen_cursor_lands_on_the_requested_row_on_the_sync_path() {
+    let terminal = TestTerminal::new(100, 5);
+    let mut app = mount(
+        component(fullscreen, (6, 2, "")),
+        Options::default(),
+        &terminal,
+    );
+    app.rerender(component(fullscreen, (6, 2, "!")));
+    flush(&mut app);
+    // design.md caps the frame at screen height: Line 0 is cut, so live y=2
+    // lands at viewport y=1. Ink's sync path clears and rewrites the overflow.
+    assert_no_full_clear(&terminal);
+    assert_cursor(&terminal, 5, 1, 3);
+    assert_eq!(
+        Screen::new(&terminal, 100, 5).rows(),
+        ["Line 1!", "Line 2", "Line 3", "Line 4", "Line 5"]
+    );
+    assert!(Screen::new(&terminal, 100, 5).scrollback().is_empty());
+}

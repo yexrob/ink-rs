@@ -500,6 +500,27 @@ fn no_bsu_esu_when_output_is_unchanged() {
 }
 
 #[test]
+fn no_bsu_esu_when_output_and_cursor_are_unchanged() {
+    fn example(cx: &mut Scope, _: &()) -> Element {
+        cx.use_cursor(Some(CursorPosition { x: 0, y: 0 }));
+        Text::new("Hello").into()
+    }
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(
+        component(example, ()),
+        Options {
+            max_fps: 1,
+            ..Options::default()
+        },
+        &terminal,
+    );
+    assert!(terminal.writes()[0].starts_with("\x1b[?2026h"));
+    app.rerender(component(example, ()));
+    app.advance(Duration::from_secs(1));
+    assert_eq!(terminal.writes().len(), 1);
+}
+
+#[test]
 fn bsu_esu_wraps_throttled_log_trailing_call() {
     let terminal = TestTerminal::new(100, 24);
     let mut app = mount(
