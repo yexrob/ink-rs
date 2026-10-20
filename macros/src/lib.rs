@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as Tokens};
 use quote::quote;

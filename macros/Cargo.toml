@@ -2,6 +2,12 @@
 name = "ink-rs-macros"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
+description = "The rsx! macro for ink-rs"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yexrob/ink-rs"
+keywords = ["tui", "terminal", "ink", "rsx"]
+categories = ["command-line-interface"]
 
 [lib]
 proc-macro = true

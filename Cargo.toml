@@ -2,7 +2,19 @@
 name = "ink-rs"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
 description = "Build terminal user interfaces with components, in the spirit of Ink"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yexrob/ink-rs"
+readme = "README.md"
+keywords = ["tui", "terminal", "cli", "ink", "flexbox"]
+categories = ["command-line-interface"]
+exclude = ["/docs", "/CLAUDE.md", "/AGENTS.md", "/.gitignore"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
 
 [workspace]
 members = ["macros"]

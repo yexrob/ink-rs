@@ -34,7 +34,11 @@
 //! dependency changes and unmount, and keeps the app alive until they finish.
 //! A sync `ink_rs::render(..).wait_until_exit()` blocks every task on its thread.
 //!
-//! See `docs/design.md` for the architecture and the milestone plan.
+//! See [docs/design.md](https://github.com/yexrob/ink-rs/blob/main/docs/design.md)
+//! for the architecture.
+
+#![forbid(unsafe_code)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod app;
 mod border;
