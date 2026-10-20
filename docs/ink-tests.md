@@ -27,7 +27,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | Ink 文件 | Ink 测试数 | 里程碑 | 移植的 `#[test]` | Rust 文件 |
 |---|---|---|---|---|
 | `absolute-truncation.tsx` | 4 | M0 | 4 | `tests/absolute_truncation.rs` |
-| `alternate-screen-example.tsx` | 2 | M4 |  |  |
+| `alternate-screen-example.tsx` | 2 | M4 | 2 | `tests/examples.rs` |
 | `ansi-newlines.tsx` | 9 | M0 | 9 | `tests/ansi_newlines.rs` |
 | `ansi-tokenizer.ts` | 26 | M0 | 26 | `src/text/ansi/tests.rs` |
 | `background.tsx` | 32 | M0 / M1 | 27 | `tests/background.rs` |
@@ -90,7 +90,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `reconciler.tsx` | 14 | M1 | 7 | `tests/reconciler.rs` |
 | `render-callback.tsx` | 4 | — | 0 | 缺 API / 不适用，见下文 |
 | `render-to-string.tsx` | 37 | M0 / M1 | 32 | `tests/render_to_string.rs` |
-| `render.tsx` | 119 | M2 / M3 / M4 | 35 | `tests/render.rs`、`tests/pty.rs` |
+| `render.tsx` | 119 | M2 / M3 / M4 | 51 | `tests/render.rs`、`tests/pty.rs`、`tests/examples.rs` |
 | `rendering-regressions.tsx` | 2 | M0 | 2 | `tests/rendering_regressions.rs` |
 | `rerender-input.tsx` | 4 | M3 | 3 | `tests/rerender_input.rs` |
 | `sanitize-ansi.ts` | 50 | M0 | 50 | `src/text/sanitize/tests.rs` |
@@ -267,7 +267,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 - 不适用，`rerender on resize` 的 resize-listener 数量断言：驱动轮询事件，不使用 Node EventEmitter；unmount 消耗 app。内容与尺寸断言已移植。resize 示例归 M4，名称见本节示例清单。
 - 不适用，Node stream、JS undefined 或 ref/unref：`accepts standard Node streams without stream-specific assertions`、`handles input without requiring process ref methods`、`undefined stream options use the default streams`。
 - 不适用，Node TTY 流缺少 `setRawMode` 方法；ink-rs 由 `Terminal` 判断 stdin：`reports raw mode as unavailable when a TTY input stream lacks raw mode`。
-- M4，示例、输入与挂起：`Jest example announces completion only after all results`、`IME example deletes whole graphemes with backspace`、`IME example ignores Enter when editing text`、`IME example places the cursor after wrapped input`、`table example keeps all columns visible in narrow terminals`、`subprocess example retains recent lines across chunks`、`terminal resize example stays open to report resized dimensions`、`stdout example updates displayed dimensions after resize`、`suspend example reports the result of false`、`suspend example reports the result of true`、`suspend example reports the result of printf editor-command-ran`、`subprocess example strips ANSI sequences across chunks`、`aria example applies 1 consecutive checkbox toggles`、`aria example applies 2 consecutive checkbox toggles`、`aria example applies 3 consecutive checkbox toggles`、`subprocess example displays command launch errors`、`subprocess example decodes UTF-8 across chunks`、`chat example submits intact text after deleting an emoji`、`chat example submits pending edits from the same input chunk`、`chat example does not insert modified shortcuts into messages`、`scroll example handles consecutive arrow keys in one input chunk`、`input example handles consecutive movement keys`、`incremental example keeps its selection visible after resize`、`incremental example grows its logs after terminal resize`、`snake ignores a reversal queued between ticks`。
+- M4，示例与挂起：`Jest example announces completion only after all results`、`subprocess example retains recent lines across chunks`、`terminal resize example stays open to report resized dimensions`、`suspend example reports the result of false`、`suspend example reports the result of true`、`suspend example reports the result of printf editor-command-ran`、`subprocess example strips ANSI sequences across chunks`、`subprocess example displays command launch errors`、`subprocess example decodes UTF-8 across chunks`。
 - 不适用，React transition：`transition example deletes a whole grapheme from both queries`、`transition example ignores Enter in the search query`。
 - 不适用，断言 Ink 的整屏清除或逐行擦除次数；ink-rs 使用高度上限和 cell diff：`erase screen`、`erase screen where <Static> exists but interactive part is taller than viewport`、`erase screen where state changes in small viewport`、`#450: full-height rerenders should not repeatedly clear terminal`、`#450: shrink from full-height to rows - 1 should clear exactly once`、`#450: shrink from overflow to rows - 1 should clear exactly once`、`#450: <Static> with shrink from full-height should clear exactly once`、`#450: full-height rerenders with <Static> should not repeatedly clear terminal`。
 - 不适用，Windows 不在 v1 范围内：`#969: full-height rerenders on Windows should clear terminal between frames`。
@@ -386,6 +386,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 - **layout effect 写状态时少写一帧。** Ink 在提交时写出，之后执行 layout effect，状态变了写第二帧。ink-rs 在 paint 前执行 layout effect，一帧写出一次。按写出次数或第一帧断言的测试随之调整。
 - **`use_box_metrics` 首帧给值。** Ink 先写出全 0 的帧，passive effect 加微任务后写出测量值。ink-rs 在提交的每一轮刷新 ref 之后比较读者的度量，变了就在 paint 前重渲染，View 首次布局的那一帧即带测量值。`does not trigger extra re-renders when layout is unchanged` 的渲染次数由 Ink 的 2–3 次改为 2 次（未挂载一次、测量后一次）；两个 resize 用例改用 `testing::mount` 与 vt100 屏幕。
 - **`use_animation` 的观测边界。** 假时钟逐个运行截止时间，代替 FakeTimers 的 `tickAsync`，时间下界改为精确值。不断言 JS 定时器的创建与清除次数，共享定时器由 `src/runtime/tests.rs` 的截止时间测试覆盖。`reset` 是句柄，`reset is a stable function reference` 改为用挂载时的副本重置。恢复与改 interval 的归零在 layout effect 中写状态，paint 前重算，不写过时帧。`animations advance in debug mode when interactive is false` 用非交互的 `testing::mount` 与 120 fps，ink-rs 没有运行时 debug 选项。
+- **示例的观测边界。** `render.tsx` 的 16 个示例用例与 `alternate-screen-example.tsx` 不在 PTY 中运行示例进程：`tests/examples.rs` 以 `#[path]` 引入 `examples/<name>/app.rs`，用 `testing::mount` 在进程内挂载，终端尺寸同 Ink `term` 的参数（默认 100 列）。`waitForOutput` 改为越过节流窗口的 `advance`，读 vt100 屏幕。`eraseLines`、`cursorTo`、`cursorUp` 的字节检查改为屏幕行、光标位置与可见性；输出流上的正则改为屏幕行比较，`input example` 在重绘块中的行号改为屏幕的物理行。table 用例用 40 列的 `render_to_string` 代替 CI 子进程，JS 字符串长度改为 `text_width`。aria 用例以 `interactive: Some(false)` 代替 `CI=true`，N 个空格在一次 `input` 中送入，卸载后读最终帧。snake 的反向用例用假时钟推进一个 150ms 的 tick，代替等待 `Score:` 重绘。`alternate-screen-example.tsx` 的两个用例调用 `reduce`，代替解析子进程的 JSON，去掉 1 秒的 kill 计时器。incremental-rendering 示例截断长行，根节点取内容高度：ink-rs 按屏高裁掉帧顶部的行（见 app 高度上限），Ink 的测试读输出流，不受裁剪影响；截断后 30 行的终端放得下标题和选中项。期望文本不变。
 - **Static 追加时写出一次。** Ink 的 Static 靠 index 状态和 layout effect 隐藏已写出的条目，每次追加提交两次、写出两次。ink-rs 的 Static 是 host 节点，追加时写出一次。
 
 ## Ink 期望中反直觉的行为

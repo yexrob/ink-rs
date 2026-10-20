@@ -151,7 +151,7 @@ M0 的 API（`src/lib.rs`）：
 
 - **解析**移植 Ink 的 `input-parser.ts` 与 `parse-keypress.ts`，放在核心的 `input` 模块，没有 I/O。解码同 Node 的 `setEncoding('utf8')`：读取末尾不完整的 UTF-8 序列留到下一次，非法字节换成替换字符。字节切成文本、按键与粘贴事件；末尾单独的 Esc 等 20ms 再交出，截止时间并入 `render_if_due` 返回的唤醒时间。不移植 Ink 接收 `Uint8Array` 的分支：App 设置编码后不会走到它。
 - **按键**：回调收到 `(&str, KeyEvent)`。`KeyEvent` 的字段是 Ink `Key` 的 snake_case，两个 Rust 关键字改名：`return` 叫 `enter`，`super` 叫 `super_key`。kitty 事件的类型为 `Some(KeyEventType::{Press, Repeat, Release})`，传统按键为 `None`。
-- **分发**：`App::input(bytes, now)` 按事件顺序处理 kitty 查询回复、粘贴、Ctrl+C、Esc 与 Tab 的焦点切换，再按注册顺序调用活跃的 `use_input` 回调。一次调用产生的更新合并成一次提交。`Scope::use_input(active, handler)` 在 passive effect 中按 `active` 注册，注册顺序即 effect 顺序；回调取最近一次渲染的闭包。没有持有者时丢弃输入；回调请求退出后，本次读取余下的事件不再分发。Tab、Esc、Ctrl+C 在 runtime 处理，`testing::render` 与 `testing::mount` 都能用。`exit_on_ctrl_c`（默认开启）时，按下或重复的 Ctrl+C 退出应用，不交给 `use_input`；松开交给回调。
+- **分发**：`App::input(bytes, now)` 按事件顺序处理 kitty 查询回复、粘贴、Ctrl+C、Esc 与 Tab 的焦点切换，再按注册顺序调用活跃的 `use_input` 回调。一次调用产生的更新合并成一次提交。`Scope::use_input(active, handler)` 在 passive effect 中按 `active` 注册，注册顺序即 effect 顺序；回调取最近一次渲染的闭包。同一次读取的多个按键调用同一次渲染的闭包，按键各自改状态时用 `update`，`set(f(get()))` 读到的是渲染时的值。没有持有者时丢弃输入；回调请求退出后，本次读取余下的事件不再分发。Tab、Esc、Ctrl+C 在 runtime 处理，`testing::render` 与 `testing::mount` 都能用。`exit_on_ctrl_c`（默认开启）时，按下或重复的 Ctrl+C 退出应用，不交给 `use_input`；松开交给回调。
 - **raw mode** 由活跃的 `use_input`、`use_paste`、`use_focus` 持有，同 Ink。持有者从 0 变 1 时开启；回到 0 时清空解析状态，模式切换推迟到提交结束，同一次提交中先停用再启用的 hook 不切换模式，对应 Ink 推迟到微任务的关闭。stdin 不是 TTY 时，`use_input` 与 `use_paste` 让应用以 `Error::Io`（`ErrorKind::Unsupported`）退出，对应 Ink `setRawMode` 抛出的错误；`use_focus` 不开启 raw mode，不报错，同 Ink 的 `isRawModeSupported` 判断。
 - **焦点**：`Scope::use_focus(FocusOptions) -> bool` 返回本 hook 的 ID 是否有焦点。`FocusOptions { active, auto_focus, id }` 默认活跃、不自动聚焦、生成 ID；生成的 ID 为 `ink-rs:focus:` 加 runtime 内计数，代替 Ink 的 `useId`。`Scope::use_focus_manager()` 返回 `Copy` 的 `FocusManager`，按 runtime id 找到状态，提供 `enable_focus`、`disable_focus`、`focus_next`、`focus_previous`、`focus(&str)` 与 `active_id()`；render 中修改在 debug 构建下 panic，卸载开始后修改无效、读取为 `None`。状态在 Store：按注册顺序的条目、当前 ID、是否启用，以及调用过这两个 hook 的组件的弱引用；ID 变化时标脏这些组件并唤醒驱动。注册与激活在 layout effect 中执行，自动聚焦出现在首帧；Ink 在 passive effect 中执行，测试读稳定后的帧，看不出差别。条目按 hook 实例区分：重复 ID 共用焦点，导航取每个 ID 的第一个条目及其活跃标志，卸载与停用只改本 hook 的条目；Ink 按 ID 改写所有同名条目。`active_id()` 读实时状态，effect 与回调看到之前的修改；Ink 读 render 快照。Tab、Shift+Tab、Esc 在 Ctrl+C 之后、`use_input` 回调之前处理，不消费按键；Ink 的 Tab 监听在挂载时的输入监听之后。规则同 Ink：忽略松开，Ctrl / Meta / Super / Hyper 屏蔽两键，Shift 屏蔽 Esc，停用焦点管理时两键与注册时的自动聚焦不起作用，`focus_next` 等显式调用不受影响。
 - **粘贴**：有活跃的 `use_paste` 时写 `CSI ?2004h` 开启 bracketed paste，最后一个停用时写 `CSI ?2004l`，stdout 不是 TTY 时不写。`use_input` 与 `use_paste` 共用一套注册，raw mode 持有者数是两者之和。粘贴模式与 raw mode 一样在步骤结束时比较：开启在 raw mode 之后，关闭在 raw mode 之前；同一次提交中替换 `use_paste` 不写模式字节，Ink 在各 effect 中切换。粘贴内容交给 `use_paste`，不进入 `use_input`；没有 `use_paste` 时，粘贴内容作为一次输入交给 `use_input`，其中的 `\x03` 不触发退出。
@@ -192,6 +192,14 @@ Ink 的测试是规格，分四层：
 - **Ink 实现的副作用不模拟。** 有的期望值来自 JS 实现的副作用，例如稀疏数组的空洞、重复叠加的转义序列，照做要写只为测试服务的代码。这类测试改期望，原因记进 [ink-tests.md](ink-tests.md#与-ink-测试的差异)。
 - **每个里程碑移植它能表达的测试。** 依赖运行时、终端或输入的测试，随对应里程碑移植。每个 Ink 文件的状态见 [ink-tests.md](ink-tests.md)。
 - Ink 上游 skip 的测试移植后标 `#[ignore]`，写明原因。
+
+### 示例
+
+- `examples/` 移植 Ink 的示例，目录名同 Ink（kebab-case），`cargo run --example use-input` 对应 Ink 的 `npm run example examples/use-input`。文件开头注明移植的 Ink 示例。
+- 有测试的示例用 Cargo 的多文件布局：`main.rs` 放 `main`，`app.rs` 放组件、reducer 和文本逻辑，只用公开 API。`tests/examples.rs` 以 `#[path]` 引入 `app.rs`，在进程内挂载，不开 PTY。没有测试的示例是单个文件，同 `counter.rs`。
+- 周期刷新用 `use_animation`，测试用 `advance` 推进。按 tick 计数的状态由 `frame` 推出；其他状态在以 `frame` 为键的 `use_effect` 中每交付一帧走一步，迟到的唤醒跳过的格点不补走。示例在注释中写明用哪一条。`counter.rs` 保留线程加 `AppHandle` 的写法。
+- `useReducer` 改为 `State<T>` 加 `fn reduce`，`Math.random` 改为本地的 xorshift，faker 改为固定数据。
+- aria、select-input 移植画面，屏幕阅读器部分在 M5。`concurrent-suspense`、`suspense`、`use-transition` 依赖 React 并发，`router` 依赖 React Router，不移植。incremental-rendering 去掉 `incrementalRendering` 选项：ink-rs 在各模式下都按格子差分。
 
 ## 里程碑
 
