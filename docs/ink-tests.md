@@ -69,10 +69,10 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `hooks.tsx` | 6 | M2 / M3 | 2 | `tests/hooks.rs` |
 | `input-buffered-ctrl-c.tsx` | 5 | M3 |  |  |
 | `input-keypad-enter.tsx` | 2 | M3 |  |  |
-| `input-parser.ts` | 65 | M3 |  |  |
+| `input-parser.ts` | 65 | M3 | 65 | `src/input/parser/tests.rs` |
 | `is-devtools-reachable.tsx` | 3 | — |  |  |
 | `issue-973-static-commit.tsx` | 1 | M2 | 1 | `tests/issue_973_static_commit.rs` |
-| `kitty-keyboard.tsx` | 77 | M3 |  |  |
+| `kitty-keyboard.tsx` | 77 | M3 | 63 | `src/input/keypress/tests/kitty_keyboard.rs` |
 | `kitty-negotiation.tsx` | 5 | M3 |  |  |
 | `line-update.ts` | 29 | — | 0 | 不适用，cell diff 没有对应内部函数 |
 | `log-update-blank-growth.ts` | 4 | M2 | 4 | `src/output/tests/log_update_blank_growth.rs` |
@@ -85,7 +85,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `overflow.tsx` | 44 | M0 | 40 | `tests/overflow.rs` |
 | `overlap-wide-background.tsx` | 7 | M0 | 7 | `tests/overlap_wide_background.rs` |
 | `padding.tsx` | 16 | M0 / M1 | 14 | `tests/padding.rs` |
-| `parse-keypress.ts` | 27 | M3 |  |  |
+| `parse-keypress.ts` | 27 | M3 | 24 | `src/input/keypress/tests/parse_keypress.rs` |
 | `position.tsx` | 13 | M0 / M1 | 11 | `tests/position.rs` |
 | `reconciler.tsx` | 14 | M1 | 7 | `tests/reconciler.rs` |
 | `render-callback.tsx` | 4 | — | 0 | 缺 API / 不适用，见下文 |
@@ -328,6 +328,14 @@ Ink 有 95 个测试文件、1,646 个测试。
 - 不适用，文件检查 Ink 内部函数与常量：`bsu is the expected synchronized update sequence`、`esu is the expected synchronized update sequence`、`shouldSynchronize returns true for interactive TTY stream`、`shouldSynchronize returns false for non-interactive TTY stream`、`shouldSynchronize returns false for non-TTY stream`、`shouldSynchronize uses CI detection when interactive is not specified`、`shouldSynchronize returns false for non-TTY stream when interactive is not specified`。
 - 覆盖位置：`render.tsx` 的 `no bsu/esu when output is unchanged`、`bsu/esu wraps throttledLog trailing call` 检查交互式 TTY 的序列与无变化分支；`components.tsx` 的 `render all frames when interactive is explicitly true`、`interactive option overrides TTY detection`、`alternate screen - ignored when non-interactive`、`alternate screen - ignored when isTTY is false`、`alternate screen - ignored when isTTY is false even if interactive is true` 检查非 TTY 与非交互分支。CI 环境检测由 `src/driver/environment/tests.rs` 的表测试覆盖；两条 CI fixture 移植由 `src/driver/tests.rs` 覆盖。
 
+## M3 文件中不移植的测试
+
+- `parse-keypress.ts`：不适用：`parsing a single-byte Meta key does not mutate the input`、`Meta byte parsing preserves shared buffers across the full byte range`、`byte parsing preserves ASCII and multibyte UTF-8 input`。它们测 `parseKeypress` 的 `Uint8Array` 重载，App 先按 UTF-8 解码再解析，走不到这个分支。
+- `kitty-keyboard.tsx`：
+  - 重复：`kitty protocol - Ctrl letters retain their unshifted key code` 与 `kitty protocol - ctrl modifier` 输入相同，断言是后者的子集。
+  - 不适用：`kitty protocol - preserves sequence and raw`。ink-rs 的 `ParsedKey` 不保留 `raw`，`sequence` 不经 `use_input` 交给用户。
+  - 待移植：`writes enable sequence on init when mode is enabled` 至 `auto detection does not treat invalid query-like sequence as a response` 的 12 个 app 级测试，随输入接入 App 移植。
+
 ## 缺 API
 
 - `onRender` / `renderTime`：本阶段不添加，影响 `render-callback.tsx` 和 `render.tsx` 的 `outputs renderTime when onRender is passed`。
@@ -364,6 +372,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 - ANSI 分词：单独出现的 `ESC \` 记为 `Esc`，不记为 ST。
 - `wrapText("hello world", 5)` 的结果中有一行是单个空格。
 - `padding.tsx` 的宽度用例按 UTF-16 长度判断每行不超过 40，对应 Ink 的 `line.length`。
+- **输入解析的字段。** `ParsedKey` 不保留 `raw` 与 `code`，App 和 `use_input` 不读这两个字段。`parse-keypress.ts` 的 `application keypad Enter maps to Return with carriage return sequence` 去掉 `raw === undefined` 断言；`kitty-keyboard.tsx` 的 `non-kitty sequences fall back to legacy parsing`、`non-kitty sequences - ctrl+c` 把 `isKittyProtocol === undefined` 改为 `false`，`kitty protocol - malformed modifier 0 does not set all flags` 的 `super ?? false` 改为布尔字段。字节输入改为 UTF-8 字节切片，Ink 的字符串与 paste 对象改为 `InputEvent` 枚举。ESC 加单字符的 meta 规则（`metaKeyCodeRe` 的 `\p{C}`）只排除 Cc：键盘不会在 ESC 后发送格式、私用或未分配字符，Cn 随 JavaScript 引擎的 Unicode 版本变化。`src/input/parser/tests.rs` 另有一个 ink-rs 测试，覆盖非法 UTF-8 的替换、跨读取的最大子部分替换与 reset 清空残留字节，Ink 的测试没有覆盖这些情况。
 
 ## 上游跳过的测试
 

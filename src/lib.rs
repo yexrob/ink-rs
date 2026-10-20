@@ -23,6 +23,11 @@ mod components;
 mod driver;
 mod element;
 mod host;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "M3 phase 3 wires input into App and input hooks")
+)]
+mod input;
 mod layout;
 mod output;
 mod paint;
