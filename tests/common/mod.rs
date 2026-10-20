@@ -439,20 +439,154 @@ impl Screen {
         self.writes = output.len();
     }
 
-    /// Models reconstruct-terminal.ts's xterm shrink: drop rows below the
-    /// cursor first, then scroll top rows into history. vt100 set_size alone
-    /// truncates the bottom. Growth does not pull rows from scrollback.
+    /// Reflows primary-screen logical lines on width decreases, including
+    /// scrollback, keeping the screen top anchored until the cursor needs a
+    /// scroll (tmux anchors the bottom and pushes added rows' worth of top rows
+    /// into history). A cursor past its line's content lands at the end of the
+    /// last row, as in tmux. Width growth does not rejoin wrapped rows; alternate screens
+    /// do not reflow. Then applies reconstruct-terminal.ts's xterm row shrink:
+    /// drop rows below the cursor, then scroll top rows into history.
+    /// Height growth does not pull rows from scrollback.
+    /// vt100 cannot write double-width glyphs at one column or mark a wide
+    /// glyph's wrap across an unused last cell; those cases need a real terminal.
     pub fn resize(&mut self, columns: u16, rows: u16) {
         assert!(columns > 0 && rows > 0);
         let old_rows = self.parser.screen().size().0;
-        if rows < old_rows {
+        if columns < self.columns && !self.alternate_screen() {
+            // Use the row-shrink viewport after computing reflow coordinates.
+            // set_size would discard the wrap marks rebuilt by the parser.
+            self.reflow(columns, rows.min(old_rows));
+        } else if rows < old_rows {
             let scroll = (self.cursor().0 + 1).saturating_sub(rows);
             if scroll > 0 {
                 self.parser.process(format!("\x1b[{scroll}S").as_bytes());
             }
         }
-        self.parser.screen_mut().set_size(rows, columns);
+        if self.parser.screen().size() != (rows, columns) {
+            self.parser.screen_mut().set_size(rows, columns);
+        }
         self.columns = columns;
+    }
+
+    fn reflow(&mut self, columns: u16, rows: u16) {
+        let old_rows = self.parser.screen().size().0;
+        let cursor = self.cursor();
+        let visible = self.cursor_visible();
+        let attributes = self.parser.screen().attributes_formatted();
+        self.parser.screen_mut().set_scrollback(usize::MAX);
+        let history = self.parser.screen().scrollback();
+        let mut lines = vec![ReflowLine::default()];
+        let mut wrapped = false;
+        for index in 0..history + usize::from(old_rows) {
+            let row = index.saturating_sub(history) as u16;
+            self.parser
+                .screen_mut()
+                .set_scrollback(history.saturating_sub(index));
+            let screen = self.parser.screen();
+            if index > 0 && !wrapped {
+                lines.push(ReflowLine::default());
+            }
+            let line = lines.last_mut().unwrap();
+            let offset: usize = line.glyphs.iter().map(|(width, _)| width).sum();
+            if index == history {
+                line.anchor = Some(offset);
+            }
+            if index == history + usize::from(cursor.0) {
+                line.cursor = Some(offset + usize::from(cursor.1));
+            }
+            let end = (0..self.columns)
+                .rfind(|&col| {
+                    let cell = screen.cell(row, col).unwrap();
+                    cell.has_contents() || cell.is_wide_continuation()
+                })
+                .map_or(0, |col| col + 1);
+            for col in 0..end {
+                let cell = screen.cell(row, col).unwrap();
+                if cell.is_wide_continuation() {
+                    continue;
+                }
+                let width = 1 + u16::from(cell.is_wide());
+                // A cell-sized slice has no old-column cursor moves. Reset
+                // SGR because each formatted slice starts from default attrs.
+                let mut bytes = b"\x1b[m".to_vec();
+                if cell.has_contents() {
+                    bytes.extend(
+                        screen
+                            .rows_formatted(col, width)
+                            .nth(usize::from(row))
+                            .unwrap(),
+                    );
+                } else {
+                    bytes.push(b' ');
+                }
+                line.glyphs.push((usize::from(width), bytes));
+            }
+            wrapped = screen.row_wrapped(row);
+        }
+        while lines.last().is_some_and(|line| {
+            line.glyphs.is_empty() && line.cursor.is_none() && line.anchor.is_none()
+        }) {
+            lines.pop();
+        }
+
+        let columns = usize::from(columns);
+        let mut height = 0;
+        let mut anchor = 0;
+        let mut mapped_cursor = (0, 0);
+        for line in &lines {
+            if let Some(offset) = line.anchor {
+                anchor = height + line.position(columns, offset).0;
+            }
+            if let Some(offset) = line.cursor {
+                let (row, col) = line.position(columns, offset);
+                mapped_cursor = (height + row, col);
+            }
+            height += line.height(columns);
+        }
+        let top = anchor.max((mapped_cursor.0 + 1).saturating_sub(usize::from(rows)));
+        let bottom = top + usize::from(rows);
+        let mut parser = vt100::Parser::new(rows, columns as u16, 1000);
+        let mut y = 0;
+        let mut written_row = 0;
+        for line in &lines {
+            let mut offset = 0;
+            for (width, bytes) in &line.glyphs {
+                let (row, _) = line.position(columns, offset);
+                if y + row >= bottom {
+                    break;
+                }
+                parser.process(bytes);
+                offset += width;
+            }
+            let next = y + line.height(columns);
+            // End each logical line with CRLF, not an autowrap. Padding to
+            // the chosen bottom pushes exactly `top` rows into scrollback.
+            written_row = y + line.position(columns, offset.saturating_sub(1)).0;
+            while written_row < next.min(bottom - 1) {
+                parser.process(b"\r\n");
+                written_row += 1;
+            }
+            y = next;
+            if y >= bottom {
+                break;
+            }
+        }
+        for _ in written_row..bottom - 1 {
+            parser.process(b"\r\n");
+        }
+        parser.process(
+            format!(
+                "\x1b[{};{}H",
+                mapped_cursor.0 - top + 1,
+                mapped_cursor.1 + 1
+            )
+            .as_bytes(),
+        );
+        parser.process(&attributes);
+        if !visible {
+            parser.process(b"\x1b[?25l");
+        }
+        self.parser = parser;
     }
 
     pub fn rows(&self) -> Vec<String> {
@@ -487,6 +621,37 @@ impl Screen {
         let mut lines = self.scrollback();
         lines.extend(self.rows());
         lines
+    }
+}
+
+#[derive(Default)]
+struct ReflowLine {
+    glyphs: Vec<(usize, Vec<u8>)>,
+    anchor: Option<usize>,
+    cursor: Option<usize>,
+}
+
+impl ReflowLine {
+    fn position(&self, columns: usize, offset: usize) -> (usize, usize) {
+        let (mut row, mut col, mut cell) = (0, 0, 0);
+        for (width, _) in &self.glyphs {
+            if col > 0 && col + width > columns {
+                row += 1;
+                col = 0;
+            }
+            if offset < cell + width {
+                return (row, (col + offset - cell).min(columns - 1));
+            }
+            cell += width;
+            col += width;
+        }
+        // tmux puts a cursor past the content at the end of its logical line.
+        (row, col.min(columns - 1))
+    }
+
+    fn height(&self, columns: usize) -> usize {
+        let cells: usize = self.glyphs.iter().map(|(width, _)| width).sum();
+        self.position(columns, cells.saturating_sub(1)).0 + 1
     }
 }
 

@@ -339,3 +339,48 @@ fn standard_rendering_leaves_fullscreen_without_clearing_when_the_terminal_heigh
     assert!(screen.scrollback().is_empty());
     assert_no_full_clear(&terminal);
 }
+
+// ink-rs additions: Ink erases by painted rows. Shell history distinguishes
+// erasing the reflowed frame from erasing rows above it.
+#[test]
+fn width_shrink_erases_reflowed_frame_without_erasing_shell_history() {
+    let (terminal, mut app, mut screen) = shell_frame(Text::new("68 tests passed").into(), 80, 24);
+    screen.resize(10, 24);
+    app.resize(10, 24);
+    screen.update(&terminal);
+    assert_eq!(
+        trimmed(&mut screen),
+        ["shell 0", "shell 1", "shell 2", "68 tests", "passed"]
+    );
+}
+
+#[test]
+fn width_shrink_maps_declared_cursor_within_its_reflowed_line() {
+    fn example(cx: &mut Scope, _: &()) -> Element {
+        cx.use_cursor(Some(CursorPosition { x: 12, y: 1 }));
+        View::new()
+            .flex_direction(FlexDirection::Column)
+            .children(["abcdefghijklmno", "ABCDEFGHIJKLMNO", "012345678901234"].map(Text::new))
+            .into()
+    }
+    let (terminal, mut app, mut screen) = shell_frame(component(example, ()), 80, 24);
+    screen.resize(10, 24);
+    app.resize(10, 24);
+    screen.update(&terminal);
+    assert_eq!(
+        trimmed(&mut screen),
+        [
+            "shell 0",
+            "shell 1",
+            "shell 2",
+            "abcdefghij",
+            "klmno",
+            "ABCDEFGHIJ",
+            "KLMNO",
+            "0123456789",
+            "01234"
+        ]
+    );
+    assert_eq!(screen.cursor(), (4, 9));
+    assert!(screen.cursor_visible());
+}

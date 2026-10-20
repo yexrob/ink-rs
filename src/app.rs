@@ -88,6 +88,7 @@ impl AppOutput {
                 self.output.resize(
                     self.columns < usize::from(previous.columns),
                     self.rows < usize::from(previous.rows),
+                    self.columns,
                     if self.tty { self.rows } else { usize::MAX },
                     &mut bytes,
                 );

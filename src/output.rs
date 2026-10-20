@@ -2,7 +2,7 @@ use crate::paint::{Cell, Frame};
 use crate::text::styled::{self, CharStyle};
 
 /// Inline primary-screen output. The caller supplies new Static rows, not history.
-/// Dimensions must be positive; terminal resize/reflow belongs to the driver.
+/// Dimensions must be positive; the driver reports terminal resizes.
 pub(crate) struct Output {
     live: Vec<Vec<Cell>>,
     // Coordinates are relative to the live region, even when CRLF scrolls it.
@@ -166,11 +166,32 @@ impl Output {
         &mut self,
         width_decreased: bool,
         height_decreased: bool,
+        columns: usize,
         rows: usize,
         output: &mut Vec<u8>,
     ) {
-        // Ink ink.tsx resized uses the painted cursor, not a pending commit's.
-        if width_decreased || (height_decreased && self.declared.is_some()) {
+        if width_decreased {
+            if self.live.is_empty() {
+                return;
+            }
+            self.hide(output);
+            // Unlike Ink src/ink.tsx resized -> log.clear, count reflowed
+            // rows so a narrowed terminal does not retain the frame's head.
+            let above: usize = self.live[..self.cursor.1]
+                .iter()
+                .map(|row| reflow(row, columns, 0).0)
+                .sum();
+            let offset = self
+                .live
+                .get(self.cursor.1)
+                .map_or(0, |row| reflow(row, columns, self.cursor.0).1);
+            if above + offset > 0 {
+                output.extend_from_slice(format!("\x1b[{}A", above + offset).as_bytes());
+            }
+            output.extend_from_slice(b"\r\x1b[J");
+            self.forget();
+        } else if height_decreased && self.declared.is_some() {
+            // Ink src/ink.tsx resized uses the painted cursor, not a pending commit's.
             self.clear(output);
         } else if height_decreased && self.live.len() >= rows {
             // Ink shouldClearTerminalForFrame measures wasFullscreen against
@@ -250,6 +271,31 @@ impl Output {
             self.cursor.0 = x;
         }
     }
+}
+
+// Each live row is a logical line: render uses CRLF or cursor motion, not
+// autowrap. Return its physical height and the physical row holding the cursor.
+fn reflow(row: &[Cell], columns: usize, cursor: usize) -> (usize, usize) {
+    let (mut y, mut x, mut cell) = (0, 0, 0);
+    let mut cursor_row = None;
+    while cell < row.len() {
+        let mut end = cell + 1;
+        while is_continuation(row, end) {
+            end += 1;
+        }
+        let width = end - cell;
+        if x > 0 && x + width > columns {
+            y += 1;
+            x = 0;
+        }
+        if (cell..end).contains(&cursor) {
+            cursor_row = Some(y);
+        }
+        x += width;
+        cell = end;
+    }
+    // tmux puts a cursor past the content at the end of its logical line.
+    (y + 1, cursor_row.unwrap_or(y))
 }
 
 fn is_continuation(row: &[Cell], x: usize) -> bool {
