@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::collections::VecDeque;
 use std::io;
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
@@ -20,6 +21,8 @@ pub(super) enum Message {
     Wake,
     Resize,
     Signal,
+    Stop(mpsc::Sender<()>),
+    Continue,
     Input(Vec<u8>),
     InputStarted,
     InputEnded,
@@ -116,6 +119,12 @@ impl Instance {
             &self.receiver,
             self.registration.as_mut().unwrap(),
         );
+        self.registration.as_mut().unwrap().leave_loop();
+        // A Stop racing the loop's end must release its acknowledgement even
+        // when the Signal result parks this thread with its receiver alive.
+        for message in self.receiver.try_iter() {
+            drop(message);
+        }
         self.app.unmount();
         let error = self.app.take_error();
         self.registration.take();
@@ -148,9 +157,15 @@ enum Stop {
     Signal,
 }
 
-fn natural_end(next: Option<Instant>, queue: &UpdateQueue, input_alive: bool) -> bool {
+fn natural_end(
+    next: Option<Instant>,
+    queue: &UpdateQueue,
+    input_alive: bool,
+    suspended: bool,
+) -> bool {
     // Ink waitUntilExit uses Node's beforeExit; raw mode is stdin.ref().
-    next.is_none() && queue.is_idle() && !input_alive
+    // Suspension releases raw mode but must not end an app waiting for fg.
+    next.is_none() && queue.is_idle() && !input_alive && !suspended
 }
 
 fn run_loop(
@@ -161,9 +176,14 @@ fn run_loop(
     let queue = app.queue();
     let mut message = None;
     let mut input_ended = false;
+    let mut kept = VecDeque::new();
     loop {
         let mut input = Vec::new();
-        for event in message.take().into_iter().chain(receiver.try_iter()) {
+        for event in kept
+            .drain(..)
+            .chain(message.take())
+            .chain(receiver.try_iter())
+        {
             if let Message::Input(bytes) = event {
                 input.extend(bytes);
                 continue;
@@ -178,6 +198,11 @@ fn run_loop(
                 Message::Wake => {}
                 Message::Resize => app.resize(app.terminal_size()),
                 Message::Signal => return Stop::Signal,
+                Message::Stop(ack) => {
+                    app.suspend(Reason::Stop);
+                    drop(ack);
+                }
+                Message::Continue => app.resume(Reason::Stop),
                 Message::InputStarted => input_ended = false,
                 Message::InputEnded => input_ended = true,
                 Message::Input(_) => unreachable!(),
@@ -198,12 +223,27 @@ fn run_loop(
         }
         if let Some(callback) = app.begin_suspension() {
             registration.leave_loop();
+            // leave_loop serializes with Stop fan-out. Release every preceding
+            // ack before user code can block, preserving other message order.
+            for event in receiver.try_iter() {
+                if let Message::Stop(ack) = event {
+                    app.suspend(Reason::Stop);
+                    drop(ack);
+                } else {
+                    kept.push_back(event);
+                }
+            }
             callback();
             registration.rejoin_loop();
             app.resume(Reason::Api);
             continue;
         }
-        if natural_end(next, &queue, app.raw_mode() && !input_ended) {
+        if natural_end(
+            next,
+            &queue,
+            app.raw_mode() && !input_ended,
+            app.is_suspended(),
+        ) {
             // An acquire during this step can restart stdin after EOF. Observe
             // its Started notification before deciding that input is dead.
             if let Ok(event) = receiver.try_recv() {

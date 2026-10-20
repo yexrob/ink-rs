@@ -1,6 +1,7 @@
 //! Ink 8.0.0 test/exit.tsx, test/hooks.tsx, test/render.tsx and
 //! test/suspend-terminal.tsx, commit 26d2c3f.
 //! One executable serves as harness and fixture so Cargo builds both together.
+use std::ffi::OsStr;
 use std::io::{self, Write};
 #[cfg(target_os = "macos")]
 use std::os::fd::AsRawFd;
@@ -42,6 +43,8 @@ enum Case {
     AnimationPipe,
     AnimationNonInteractive,
     Suspend,
+    JobControl,
+    Orphan,
 }
 
 const CASES: &[(Case, &str, &str)] = &[
@@ -49,6 +52,16 @@ const CASES: &[(Case, &str, &str)] = &[
         Case::Suspend,
         "suspend",
         "suspendTerminal hands the terminal to a child process, then redraws (PTY)",
+    ),
+    (
+        Case::JobControl,
+        "job-control",
+        "Ctrl+Z hands the terminal to the shell and fg redraws",
+    ),
+    (
+        Case::Orphan,
+        "orphan",
+        "Ctrl+Z ignores a session-leader process group",
     ),
     (
         Case::Normal,
@@ -127,6 +140,29 @@ fn suspended_child(cx: &mut Scope, _: &()) -> Element {
             .unwrap();
     });
     Text::new("Ink frame").into()
+}
+
+fn job_control(cx: &mut Scope, _: &()) -> Element {
+    let quit = cx.use_state(|| false);
+    cx.use_input(true, move |input, _| {
+        if input == "q" {
+            quit.set(true);
+        }
+    });
+    let exit = cx.use_app();
+    let quitting = quit.get();
+    cx.use_effect(quitting, move || {
+        if quitting {
+            exit.exit();
+        }
+    });
+    let handle = cx.use_app();
+    let writer = cx.use_stdout();
+    cx.use_effect((), move || {
+        // Deliver readiness after the mounting step has acquired stdin.
+        handle.update(move || writer.write(READY));
+    });
+    Text::new("job frame").into()
 }
 
 fn animation_exit(cx: &mut Scope, _: &()) -> Element {
@@ -289,6 +325,7 @@ fn fixture(case: Case) -> Result {
         Case::Pipe => Text::new("ready-stdin-not-tty").into(),
         Case::AnimationPipe | Case::AnimationNonInteractive => component(animation_exit, ()),
         Case::Suspend => component(suspended_child, ()),
+        Case::JobControl | Case::Orphan => component(job_control, ()),
         _ => component(example, case),
     };
     let mut app = render(
@@ -398,13 +435,49 @@ fn assert_output(case: Case, output: &[u8]) -> Result {
 }
 
 fn run_pty(case: Case, id: &str) -> Result {
+    if case == Case::JobControl
+        && !std::env::var_os("PATH")
+            .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join("bash").is_file()))
+    {
+        println!("skip - job control: bash is not on PATH");
+        return Ok(());
+    }
+    let executable = std::env::current_exe()?;
+    let args = [
+        OsStr::new("--norc"),
+        OsStr::new("--noprofile"),
+        OsStr::new("-i"),
+        OsStr::new("-c"),
+        OsStr::new("\"$0\"; fg"),
+        executable.as_os_str(),
+    ];
     let mut session = Session::spawn(
-        std::env::current_exe()?.as_os_str(),
-        &[],
+        if case == Case::JobControl {
+            OsStr::new("bash")
+        } else {
+            executable.as_os_str()
+        },
+        if case == Case::JobControl { &args } else { &[] },
         &[(FIXTURE, id)],
         24,
         100,
     )?;
+    if matches!(case, Case::JobControl | Case::Orphan) {
+        session.wait_for(|output| String::from_utf8_lossy(output).contains(READY))?;
+        let start = session.output().len();
+        session.send(b"\x1a")?;
+        if case == Case::JobControl {
+            session.wait_for(|output| {
+                let output = String::from_utf8_lossy(&output[start..]);
+                output.split_once("\x1b[?25h").is_some_and(|(_, resumed)| {
+                    resumed.contains("job frame") && resumed.contains("\x1b[?25l")
+                })
+            })?;
+        } else {
+            thread::sleep(Duration::from_millis(300));
+        }
+        session.send(b"q")?;
+    }
     if matches!(case, Case::Alive | Case::CtrlC) {
         let mut ready_at = None;
         session.wait_for(|output| {

@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Once, OnceLock, mpsc};
 use std::thread::{self, ThreadId};
 
-use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM, SIGWINCH};
+use signal_hook::consts::{SIGCONT, SIGHUP, SIGINT, SIGTERM, SIGTSTP, SIGWINCH};
 use signal_hook::iterator::Signals;
 
 use super::{Message, stdin};
@@ -138,6 +138,10 @@ impl ProcessTerminal {
 }
 
 impl Terminal for ProcessTerminal {
+    fn stop_process(&mut self) {
+        let _ = rustix::process::kill_current_process_group(rustix::process::Signal::TSTP);
+    }
+
     fn stdin_is_tty(&self) -> bool {
         io::stdin().is_terminal()
     }
@@ -335,12 +339,41 @@ fn install_signals() -> &'static io::Result<()> {
                 registry().default_signals.clone(),
             )?;
         }
-        let mut signals = Signals::new([SIGINT, SIGTERM, SIGHUP, SIGWINCH])?;
+        let mut signals = Signals::new([SIGINT, SIGTERM, SIGHUP, SIGWINCH, SIGTSTP, SIGCONT])?;
         thread::Builder::new()
             .name("ink-signals".into())
             .spawn(move || {
                 for signal in signals.forever() {
+                    if signal == SIGTSTP {
+                        // Session-leader groups have no shell to continue them.
+                        // Default TSTP ignores orphaned groups, but emulation uses
+                        // SIGSTOP. A full orphan check needs other processes' parents.
+                        if rustix::process::getsid(None).ok() == Some(rustix::process::getpgrp()) {
+                            continue;
+                        }
+                        let (ack, done) = mpsc::channel::<()>();
+                        {
+                            let entries = registry().entries.lock().unwrap();
+                            for entry in entries.iter() {
+                                // A callback has handed over; the render-to-wait
+                                // gap stops without teardown. Neither has a loop.
+                                if entry.in_loop.load(Ordering::SeqCst) {
+                                    let _ = entry.sender.send(Message::Stop(ack.clone()));
+                                }
+                            }
+                        }
+                        drop(ack);
+                        while done.recv().is_ok() {}
+                        let _ = signal_hook::low_level::emulate_default_handler(SIGTSTP);
+                        continue;
+                    }
                     let entries = registry().entries.lock().unwrap();
+                    if signal == SIGCONT {
+                        for entry in entries.iter() {
+                            let _ = entry.sender.send(Message::Continue);
+                        }
+                        continue;
+                    }
                     if signal == SIGWINCH {
                         for entry in entries.iter() {
                             let _ = entry.sender.send(Message::Resize);

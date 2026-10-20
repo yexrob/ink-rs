@@ -5,7 +5,7 @@ edition = "2024"
 description = "Build terminal user interfaces with components, in the spirit of Ink"
 
 [dependencies]
-rustix = { version = "1", features = ["termios"] }
+rustix = { version = "1", features = ["termios", "process"] }
 filedescriptor = "0.8"
 signal-hook = { version = "0.3", default-features = false, features = ["iterator"] }
 taffy = { version = "0.15", default-features = false, features = ["std", "taffy_tree", "flexbox"] }

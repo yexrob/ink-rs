@@ -223,3 +223,76 @@ fn state_output_and_focus_assertions_report_the_callers_location() {
         assert_eq!(error.location().unwrap().file, file!());
     }
 }
+
+#[test]
+fn ctrl_z_stops_the_process_but_a_kitty_release_reaches_input() {
+    use crate::{KeyEvent, KeyEventType, KittyFlags, KittyKeyboard};
+    use std::{cell::RefCell, rc::Rc};
+    for kitty_keyboard in [
+        KittyKeyboard::Disabled,
+        KittyKeyboard::Enabled(
+            KittyFlags::DISAMBIGUATE_ESCAPE_CODES | KittyFlags::REPORT_EVENT_TYPES,
+        ),
+    ] {
+        let inputs = Rc::new(RefCell::new(Vec::new()));
+        let terminal = TestTerminal::new(100, 24);
+        let mut app = mount(
+            component(
+                |cx: &mut Scope, inputs: &Rc<RefCell<Vec<(String, KeyEvent)>>>| {
+                    let inputs = inputs.clone();
+                    cx.use_input(true, move |input, key| {
+                        inputs.borrow_mut().push((input.into(), key))
+                    });
+                    Text::new("input").into()
+                },
+                inputs.clone(),
+            ),
+            Options {
+                kitty_keyboard,
+                ..Options::default()
+            },
+            &terminal,
+        );
+        app.input("\x1a");
+        assert_eq!(terminal.stop_process_calls(), 1);
+        assert!(inputs.borrow().is_empty());
+        app.input("\x1b[122;5:3u");
+        assert_eq!(terminal.stop_process_calls(), 1);
+        let inputs = inputs.borrow();
+        assert_eq!(inputs.len(), 1);
+        assert_eq!(inputs[0].0, "z");
+        assert!(inputs[0].1.ctrl);
+        assert_eq!(inputs[0].1.event_type, Some(KeyEventType::Release));
+    }
+}
+
+#[test]
+fn disabling_suspend_on_ctrl_z_passes_the_key_to_input() {
+    use crate::KeyEvent;
+    use std::{cell::RefCell, rc::Rc};
+    let inputs = Rc::new(RefCell::new(Vec::new()));
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(
+        component(
+            |cx: &mut Scope, inputs: &Rc<RefCell<Vec<(String, KeyEvent)>>>| {
+                let inputs = inputs.clone();
+                cx.use_input(true, move |input, key| {
+                    inputs.borrow_mut().push((input.into(), key))
+                });
+                Text::new("input").into()
+            },
+            inputs.clone(),
+        ),
+        Options {
+            suspend_on_ctrl_z: false,
+            ..Options::default()
+        },
+        &terminal,
+    );
+    app.input("\x1a");
+    assert_eq!(terminal.stop_process_calls(), 0);
+    let inputs = inputs.borrow();
+    assert_eq!(inputs.len(), 1);
+    assert_eq!(inputs[0].0, "z");
+    assert!(inputs[0].1.ctrl);
+}

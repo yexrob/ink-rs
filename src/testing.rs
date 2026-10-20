@@ -179,6 +179,7 @@ pub struct TestTerminal {
     tty: bool,
     stdin_tty: bool,
     raw_mode_calls: Rc<RefCell<Vec<bool>>>,
+    stop_process_calls: Rc<Cell<usize>>,
 }
 
 impl TestTerminal {
@@ -191,6 +192,7 @@ impl TestTerminal {
             tty: true,
             stdin_tty: true,
             raw_mode_calls: Rc::default(),
+            stop_process_calls: Rc::default(),
         }
     }
 
@@ -203,6 +205,11 @@ impl TestTerminal {
     /// Returns every raw-mode switch argument in call order, shared by clones.
     pub fn raw_mode_calls(&self) -> Vec<bool> {
         self.raw_mode_calls.borrow().clone()
+    }
+
+    /// Returns the number of process-group stop requests, shared by clones.
+    pub fn stop_process_calls(&self) -> usize {
+        self.stop_process_calls.get()
     }
 
     /// Selects whether stdout is a TTY.
@@ -258,6 +265,11 @@ impl TestTerminal {
 }
 
 impl Terminal for TestTerminal {
+    fn stop_process(&mut self) {
+        self.stop_process_calls
+            .set(self.stop_process_calls.get() + 1);
+    }
+
     fn stdin_is_tty(&self) -> bool {
         self.stdin_tty
     }

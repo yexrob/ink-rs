@@ -65,6 +65,10 @@ impl Drop for Registration {
 }
 
 impl Runtime {
+    pub(crate) fn take_stop_request(&mut self) -> bool {
+        std::mem::take(&mut self.stop_requested)
+    }
+
     pub(crate) fn pause_input(&mut self) {
         let mut input = self.instance.store.input.borrow_mut();
         input.parser.reset();
@@ -115,6 +119,7 @@ impl Runtime {
             if self.queue().has_exit() {
                 break;
             }
+            let pasted = matches!(&event, InputEvent::Paste(_));
             let text = match event {
                 InputEvent::Text(text) => {
                     if is_query_response(&text) {
@@ -149,7 +154,7 @@ impl Runtime {
                     text
                 }
             };
-            self.emit_input(&text);
+            self.emit_input(&text, pasted);
         }
         let mut input = self.instance.store.input.borrow_mut();
         if input.parser.has_pending_escape() {
@@ -170,11 +175,11 @@ impl Runtime {
         if let Some(text) = text
             && !self.queue().has_exit()
         {
-            self.emit_input(&text);
+            self.emit_input(&text, false);
         }
     }
 
-    fn emit_input(&mut self, text: &str) {
+    fn emit_input(&mut self, text: &str, pasted: bool) {
         let parsed = parse_keypress(text);
         if self.exit_on_ctrl_c
             && parsed.name == "c"
@@ -182,6 +187,19 @@ impl Runtime {
             && parsed.event_type != Some(KeyEventType::Release)
         {
             self.queue().request_exit(Ok(None));
+            return;
+        }
+        if self.suspend_on_ctrl_z
+            && !pasted
+            && parsed.name == "z"
+            && parsed.ctrl
+            && !parsed.shift
+            && !parsed.meta
+            && !parsed.super_key
+            && !parsed.hyper
+            && parsed.event_type != Some(KeyEventType::Release)
+        {
+            self.stop_requested = true;
             return;
         }
         // Ink's App effect installs Tab after mount-time input listeners.

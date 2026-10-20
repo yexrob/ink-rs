@@ -22,6 +22,10 @@ pub struct Options {
     /// Exit with `Ok(None)` on a Ctrl+C press or repeat (default true).
     /// Those events do not reach `use_input`; a release does.
     pub exit_on_ctrl_c: bool,
+    /// Stop the process group on a Ctrl+Z press or repeat (default true), as
+    /// the terminal's suspend key does. The shell's `fg` resumes the app.
+    /// Those events do not reach `use_input`; a release does.
+    pub suspend_on_ctrl_z: bool,
     /// Opt-in kitty keyboard negotiation. Defaults to [`KittyKeyboard::Disabled`].
     pub kitty_keyboard: KittyKeyboard,
     /// Paint rate limit, default 30. The window is ceil(1000 / max_fps)
@@ -39,6 +43,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             exit_on_ctrl_c: true,
+            suspend_on_ctrl_z: true,
             kitty_keyboard: KittyKeyboard::Disabled,
             max_fps: 30,
             interactive: None,
@@ -286,10 +291,12 @@ impl WriteDestination for RefCell<AppOutput> {
 
 pub(crate) enum Reason {
     Api,
+    Stop,
 }
 
 pub(crate) struct App {
     api_suspended: bool,
+    stop_suspended: bool,
     raw_mode: bool,
     kitty_query: Option<(KittyFlags, Instant)>,
     runtime: Option<Runtime>,
@@ -305,7 +312,7 @@ pub(crate) struct App {
 
 impl App {
     pub(crate) fn is_suspended(&self) -> bool {
-        self.api_suspended
+        self.api_suspended || self.stop_suspended
     }
 
     pub(crate) fn begin_suspension(&mut self) -> Option<Box<dyn FnOnce() + Send>> {
@@ -321,6 +328,7 @@ impl App {
         let suspended = self.is_suspended();
         match reason {
             Reason::Api => self.api_suspended = true,
+            Reason::Stop => self.stop_suspended = true,
         }
         if suspended || self.runtime.is_none() {
             return;
@@ -358,6 +366,7 @@ impl App {
         }
         let flag = match reason {
             Reason::Api => &mut self.api_suspended,
+            Reason::Stop => &mut self.stop_suspended,
         };
         if !std::mem::take(flag) {
             return;
@@ -444,6 +453,7 @@ impl App {
         runtime.resize(size);
         runtime.catch = true;
         runtime.exit_on_ctrl_c = options.exit_on_ctrl_c;
+        runtime.suspend_on_ctrl_z = options.suspend_on_ctrl_z;
         let destination = Rc::new(RefCell::new(AppOutput {
             output: Output::new(),
             terminal,
@@ -479,6 +489,7 @@ impl App {
         runtime.set_destination(destination.clone());
         Self {
             api_suspended: false,
+            stop_suspended: false,
             raw_mode: false,
             kitty_query,
             queue: runtime.queue(),
@@ -531,6 +542,9 @@ impl App {
         let runtime = self.runtime.as_mut()?;
         runtime.tick_animations(now, self.window);
         runtime.flush_input(now);
+        if runtime.take_stop_request() {
+            self.destination.borrow_mut().terminal.stop_process();
+        }
         runtime.queue().drain();
         let commit = runtime.has_work().then(|| {
             let commit = runtime.commit();
@@ -628,10 +642,15 @@ impl App {
         }
         if self.raw_mode
             && let Some(runtime) = &mut self.runtime
-            && runtime.input(bytes, now)
-            && let Some((flags, _)) = self.kitty_query.take()
         {
-            self.destination.borrow_mut().enable_kitty(flags);
+            if runtime.input(bytes, now)
+                && let Some((flags, _)) = self.kitty_query.take()
+            {
+                self.destination.borrow_mut().enable_kitty(flags);
+            }
+            if runtime.take_stop_request() {
+                self.destination.borrow_mut().terminal.stop_process();
+            }
         }
     }
 
@@ -719,7 +738,7 @@ impl App {
         if committed {
             runtime.passive_effects();
         }
-        if !(self.interactive && self.api_suspended) {
+        if !(self.interactive && (self.api_suspended || self.stop_suspended)) {
             runtime.after_write();
         }
         // Ink finishUnmount restores the terminal after React cleanups.
