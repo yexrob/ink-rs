@@ -90,7 +90,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `reconciler.tsx` | 14 | M1 | 7 | `tests/reconciler.rs` |
 | `render-callback.tsx` | 4 | — | 0 | 缺 API / 不适用，见下文 |
 | `render-to-string.tsx` | 37 | M0 / M1 | 32 | `tests/render_to_string.rs` |
-| `render.tsx` | 119 | M2 | 28 | `tests/render.rs` |
+| `render.tsx` | 119 | M2 | 31 | `tests/render.rs` |
 | `rendering-regressions.tsx` | 2 | M0 | 2 | `tests/rendering_regressions.rs` |
 | `rerender-input.tsx` | 4 | M3 |  |  |
 | `sanitize-ansi.ts` | 50 | M0 | 50 | `src/text/sanitize/tests.rs` |
@@ -111,7 +111,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `suspension-input-disable.tsx` | 7 | M4 |  |  |
 | `suspension-output.tsx` | 3 | M4 |  |  |
 | `suspension-resize.tsx` | 2 | M4 |  |  |
-| `terminal-resize.tsx` | 28 | M2 |  |  |
+| `terminal-resize.tsx` | 28 | M2 | 15 | `tests/terminal_resize.rs` |
 | `text-controls.tsx` | 24 | M0 | 24 | `tests/text_controls.rs`, `src/text/sanitize/tests.rs` |
 | `text-width.tsx` | 18 | M0 | 18 | `tests/text_width.rs` |
 | `text.tsx` | 57 | M0 / M1 | 49 | `tests/text.rs` |
@@ -265,6 +265,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 
 ### `render.tsx`
 
+- 不适用，`rerender on resize` 的 resize-listener 数量断言：驱动轮询事件，不使用 Node EventEmitter；unmount 消耗 app。内容与尺寸断言已移植。resize 示例归 M4，名称见本节示例清单。
 - 不适用，Node stream、JS undefined 或 ref/unref：`accepts standard Node streams without stream-specific assertions`、`handles input without requiring process ref methods`、`undefined stream options use the default streams`。
 - M3，输入和 raw mode：`reports raw mode as unavailable when a TTY input stream lacks raw mode`。
 - M4，示例、输入与挂起：`Jest example announces completion only after all results`、`IME example deletes whole graphemes with backspace`、`IME example ignores Enter when editing text`、`IME example places the cursor after wrapped input`、`table example keeps all columns visible in narrow terminals`、`subprocess example retains recent lines across chunks`、`terminal resize example stays open to report resized dimensions`、`stdout example updates displayed dimensions after resize`、`suspend example reports the result of false`、`suspend example reports the result of true`、`suspend example reports the result of printf editor-command-ran`、`subprocess example strips ANSI sequences across chunks`、`aria example applies 1 consecutive checkbox toggles`、`aria example applies 2 consecutive checkbox toggles`、`aria example applies 3 consecutive checkbox toggles`、`subprocess example displays command launch errors`、`subprocess example decodes UTF-8 across chunks`、`chat example submits intact text after deleting an emoji`、`chat example submits pending edits from the same input chunk`、`chat example does not insert modified shortcuts into messages`、`scroll example handles consecutive arrow keys in one input chunk`、`input example handles consecutive movement keys`、`incremental example keeps its selection visible after resize`、`incremental example grows its logs after terminal resize`、`snake ignores a reversal queued between ticks`。
@@ -283,6 +284,13 @@ Ink 有 95 个测试文件、1,646 个测试。
 - M3，退出值与卸载重入：`waitUntilExit resolves first exit value when duplicate exits happen during teardown`。
 - 不适用，Node 写回调重入、运行时 debug 或 JS realm：`waitUntilExit resolves first exit value when exit is re-entered during unmount writes`、`waitUntilExit resolves first exit value when exit is re-entered during unmount writes in debug mode`、`waitUntilExit resolves first exit value when exit is re-entered during unmount writes with screen reader`、`exit rejects on cross-realm Error`、`exit with cross-realm Error rejects after stdout write callback`。
 - 不适用，Node ended stdout、JS timer 数量或 Yoga 内存释放：`unmount does not write to ended stdout stream`、`unmount cancels pending throttled log writes when stdout is ended`、`unmount cancels pending throttled render when stdout is ended`、`unmount frees the root Yoga node`。
+
+### `terminal-resize.tsx`
+
+- 重复，`incrementalRendering` 变体：`rows shrink with a cursor above the output bottom keeps lines above the frame - cursor row 0, 8 rows (incremental)`、`rows shrink with a cursor above the output bottom keeps lines above the frame - cursor row 4, 7 rows (incremental)`、`width and height shrinking together keeps lines above the frame (incremental)`、`rows shrink right after a commit clears the cursor keeps lines above the frame (incremental)`、`incremental rendering - erases and rewrites the frame when the terminal height shrinks onto it`、`incremental rendering - keeps content above the frame when the terminal height shrinks onto it and a custom cursor sits on it`、`incremental rendering - keeps content above the frame when the terminal height shrinks onto it and the same render moves a custom cursor`、`incremental rendering - writes nothing when the terminal height shrinks and the frame still fits`、`incremental rendering - leaves fullscreen without clearing when the terminal height grows`。
+- 不适用，Node EventEmitter；unmount 消耗 app：`useWindowSize removes resize listener on unmount`、`useWindowSize does not crash when resize fires after unmount`。
+- 不适用，npm `terminal-size` 经 `LINES` 取行数，ink-rs 由驱动查询尺寸，M2 同步驱动负责：`useWindowSize falls back to terminal-size rows when stdout.rows is missing`。
+- 不适用，ink-rs 由 resize 事件获知尺寸，Ink 每帧读取 rows：`standard rendering - keeps content above the frame when the terminal height shrinks onto it and the same render moves a custom cursor`。其 incremental 变体见重复清单。
 
 ### `clear-rerender.tsx`
 
@@ -328,6 +336,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 
 ## 与 Ink 测试的差异
 
+- **resize 的观测边界。** `terminal-resize.tsx` 的订阅安装前 resize 用例改用 live 测试驱动：layout effect 改 TestTerminal 尺寸，下一步处理事件；初始 `100x40` 与最终 `60x20` 不变。尺寸更新和四个宽度用例把最后一次 write 的文本比较改为 vt100 屏幕比较，保留文本、边框和尺寸变化。两种 cursor-row 收缩、宽高同时收缩、提交清除光标后收缩和 custom-cursor resize-event 用例保留原 shell + frame 内容，经过 `Screen::resize` 的 xterm 行收缩模型重建 scrollback 与屏幕；仅去掉末尾空行，不过滤内部空行。`homeAndEraseDown + frame` 的字节 pin 改为六行可见、scrollback 为被收缩推进的 `line 0`、光标在末行行首；`eraseLines(6) + frame + newline` 改为帧保留、光标在帧下一行，不断言增长拉回的行。仍放得下时保留无字节断言。`render.tsx` 的 fullscreen 换行用例改为屏幕两行、scrollback 中的 `First` 与末行行首光标；边框 resize 改为屏幕中的原 10 列和新 8 列边框；viewport shrink 保留一次 `CSI 1;1H CSI J`，并禁止 `CSI 2J`、`CSI 3J`。所有行收缩用例使用 `tests/common::Screen::resize`。原测试期望未改。
 - **app 高度上限。** `render.tsx` 的 `growing into an overflowing frame keeps <Static> rows that are still in the viewport - standard` 保留 History、S1–S3 和 `live 2 tick 1` 至 `live 4 tick 1`；顶部被裁掉的 `live 0`、`live 1` 不进入 scrollback。`alternate screen replays <Static> items added while the frame overflows once - standard` 的溢出阶段不输出被裁掉的 Static 行，检查可见屏幕无 Static；收缩后保留原期望 `S1, S2, S3, live 0 tick 3, 空行`。`cursor.tsx` 的 `standard rendering - fullscreen: cursor lands on the requested row on the sync path` 在 5 行终端中裁掉 6 行帧的 `Line 0`，可见 `Line 1!` 至 `Line 5`，声明 `(x=3,y=2)` 落到视口 `(row=1,column=3)`；不清屏，裁掉的行不进 scrollback，代替 Ink 的清屏与 cursorUp 字节断言。这些行为由 design.md 的屏高上限决定。
 - **cursor 与 hooks 的观测边界。** `cursor.tsx` 的 memo、stdout/stderr 写入和满屏更新测试把 hide/show 顺序与 cursorUp + cursorTo 字节改为 vt100 的光标行、列、可见性；memo 的卸载分支保留 hide 存在且 show 不存在的字节断言。`cursor-exit-position.tsx` 的 `done returns the cursor once without erasing output` 改为屏幕内容、光标在帧下方和第二次 done 无字节；备用屏退出检查主屏、光标、可见性，并保留退出序列之后只有 show 的字节断言。`hooks.tsx` 在进程内重建 fixture，将两个流按写入顺序喂给同一个 vt100 屏幕，卸载后添加 `exited`；stdout 的 stripAnsi/换行切分改为屏幕行比较。debug 用例保留数据和重放内容的期望。`render.tsx` 的同步序列用例检查初帧包装，重渲染后无新 write。
 - **app 的观测边界。** 按移植范围，整屏清除次数、按清屏序列切帧的部分改为 vt100 屏幕观测；零整屏清除断言检查 `CSI 2J`、`CSI 3J`、`CSI 1;1H CSI J` 均未出现。`render all frames when interactive is explicitly true` 按每帧屏幕验证 Count 0–2，cell diff 不重写 Count 前缀。`side-by-side public components do not rewrite the unchanged left region` 检查左侧区域未重写及屏幕中的计数；不是锁定 Ink 的 CHA + EL。`no throttled renders after unmount` 的卸载消耗 TestApp，没有卸载后的 tick。以上不改变 Ink 的内容期望。

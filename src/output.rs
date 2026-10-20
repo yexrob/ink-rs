@@ -146,13 +146,38 @@ impl Output {
         let mut bytes = Vec::new();
         self.hide(&mut bytes);
         // Ink src/cursor-helpers.ts:129-143 finds the top from the real cursor.
-        for y in 0..self.live.len() {
-            self.move_to((0, y), &mut bytes);
-            bytes.extend_from_slice(b"\x1b[K");
+        if self.declared.is_some() {
+            // Rows below a declared cursor may have been dropped on resize.
+            // Returning from the old bottom would erase history above the frame.
+            self.move_to((0, 0), &mut bytes);
+            bytes.extend_from_slice(b"\x1b[J");
+        } else {
+            for y in 0..self.live.len() {
+                self.move_to((0, y), &mut bytes);
+                bytes.extend_from_slice(b"\x1b[K");
+            }
         }
         self.move_to((0, 0), &mut bytes);
         self.forget();
         output.extend(bytes);
+    }
+
+    pub(crate) fn resize(
+        &mut self,
+        width_decreased: bool,
+        height_decreased: bool,
+        rows: usize,
+        output: &mut Vec<u8>,
+    ) {
+        // Ink ink.tsx resized uses the painted cursor, not a pending commit's.
+        if width_decreased || (height_decreased && self.declared.is_some()) {
+            self.clear(output);
+        } else if height_decreased && self.live.len() >= rows {
+            // Ink shouldClearTerminalForFrame measures wasFullscreen against
+            // the new rows: the terminal has scrolled the frame's top away.
+            output.extend_from_slice(b"\x1b[1;1H\x1b[J");
+            self.forget();
+        }
     }
 
     pub(crate) fn done(&mut self, output: &mut Vec<u8>) {

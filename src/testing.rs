@@ -1,6 +1,6 @@
 //! A mounted tree with frame history, driven by calls to [`TestInstance::settle`].
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -148,7 +148,8 @@ impl TestInstance {
 #[derive(Clone)]
 pub struct TestTerminal {
     writes: Rc<RefCell<Vec<(OutputStream, String)>>>,
-    size: Option<(u16, u16)>,
+    size: Rc<Cell<Option<(u16, u16)>>>,
+    resized: Rc<Cell<bool>>,
     tty: bool,
 }
 
@@ -157,7 +158,8 @@ impl TestTerminal {
     pub fn new(columns: u16, rows: u16) -> Self {
         Self {
             writes: Rc::default(),
-            size: Some((columns, rows)),
+            size: Rc::new(Cell::new(Some((columns, rows)))),
+            resized: Rc::default(),
             tty: true,
         }
     }
@@ -169,9 +171,16 @@ impl TestTerminal {
     }
 
     /// Makes the terminal size unknown, exercising the 80 by 24 fallback.
-    pub fn without_size(mut self) -> Self {
-        self.size = None;
+    pub fn without_size(self) -> Self {
+        self.size.set(None);
         self
+    }
+
+    /// Changes the shared size and queues a resize event for the next app step.
+    /// A zero dimension is unknown and falls back to 80 columns or 24 rows.
+    pub fn resize(&self, columns: u16, rows: u16) {
+        self.size.set(Some((columns, rows)));
+        self.resized.set(true);
     }
 
     /// Returns one string per stdout write, in write order.
@@ -225,7 +234,7 @@ impl Terminal for TestTerminal {
     }
 
     fn size(&self) -> Option<(u16, u16)> {
-        self.size
+        self.size.get()
     }
 
     fn is_tty(&self) -> bool {
@@ -246,8 +255,9 @@ pub fn mount(element: impl Into<Element>, options: Options, terminal: &TestTermi
             options.color_level.unwrap_or(ColorLevel::Basic),
         ),
         now: Instant::now(),
+        terminal: terminal.clone(),
     };
-    app.app.render_if_due(app.now);
+    app.step();
     app
 }
 
@@ -255,19 +265,40 @@ pub fn mount(element: impl Into<Element>, options: Options, terminal: &TestTermi
 pub struct TestApp {
     app: App,
     now: Instant,
+    terminal: TestTerminal,
 }
 
 impl TestApp {
     /// Reconciles the root and runs a step at the current clock time.
     pub fn rerender(&mut self, element: impl Into<Element>) {
         self.app.rerender(element.into());
-        self.app.render_if_due(self.now);
+        self.step();
+    }
+
+    /// Changes the terminal size and runs a resize step at the current time.
+    pub fn resize(&mut self, columns: u16, rows: u16) {
+        self.terminal.resize(columns, rows);
+        self.step();
+    }
+
+    fn step(&mut self) -> Option<Instant> {
+        if self.terminal.resized.replace(false) {
+            self.app.resize(self.terminal.size());
+        }
+        let due = self.app.render_if_due(self.now);
+        // Effects can enqueue an event while a commit is running. Like an
+        // event-source poll, deliver it on the next step, not inside Runtime.
+        if self.terminal.resized.get() {
+            Some(self.now)
+        } else {
+            due
+        }
     }
 
     /// Runs a step now, then every due step through the target time.
     pub fn advance(&mut self, duration: Duration) {
         let target = self.now + duration;
-        while let Some(due) = self.app.render_if_due(self.now) {
+        while let Some(due) = self.step() {
             if due > target {
                 break;
             }

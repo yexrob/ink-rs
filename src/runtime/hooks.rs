@@ -1,14 +1,15 @@
 use std::any::{Any, TypeId};
 use std::rc::Rc;
 
-use super::Dirty;
 use super::output::{CursorCleanup, CursorPosition, OutputStream, OutputWriter};
 use super::state::{ElementMetrics, NodeRef, State, StateSlot, Store};
+use super::{Dirty, WindowSize};
 
 type Setup = Box<dyn FnOnce() -> Box<dyn Any>>;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Kind {
+    WindowSize,
     NodeRef,
     State(TypeId),
     Memo(TypeId, TypeId),
@@ -24,6 +25,7 @@ pub(super) struct Effect {
 }
 
 pub(super) enum Value {
+    WindowSize,
     NodeRef {
         handle: NodeRef,
         slot: StateSlot,
@@ -51,6 +53,22 @@ pub struct Scope<'a> {
 }
 
 impl Scope<'_> {
+    /// Returns the current window dimensions in cells. Changes to either
+    /// dimension schedule this component. String and debug renders use
+    /// [`crate::RenderOptions::columns`] and 24 rows.
+    pub fn use_window_size(&mut self) -> WindowSize {
+        let index = self.position(Kind::WindowSize);
+        if index == self.hooks.len() {
+            self.hooks.push(Hook {
+                kind: Kind::WindowSize,
+                value: Value::WindowSize,
+            });
+        }
+        // Ink use-window-size.ts rechecks at subscription. Reading during
+        // render registers the reader before any commit effects can resize.
+        self.store.window_size.get()
+    }
+
     /// Declares the terminal cursor in cells relative to the live frame, below
     /// Static output. `None` hides it. Each render commits this declaration;
     /// a component that skips rendering retains its previous declaration.

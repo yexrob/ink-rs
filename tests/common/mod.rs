@@ -414,6 +414,7 @@ fn show(items: &[Item]) -> String {
 pub struct Screen {
     parser: vt100::Parser,
     columns: u16,
+    writes: usize,
 }
 
 impl Screen {
@@ -422,7 +423,36 @@ impl Screen {
         for (_, write) in terminal.output() {
             parser.process(write.as_bytes());
         }
-        Self { parser, columns }
+        Self {
+            parser,
+            columns,
+            writes: terminal.output().len(),
+        }
+    }
+
+    /// Feeds writes made since the last observation.
+    pub fn update(&mut self, terminal: &ink_rs::testing::TestTerminal) {
+        let output = terminal.output();
+        for (_, write) in &output[self.writes..] {
+            self.parser.process(write.as_bytes());
+        }
+        self.writes = output.len();
+    }
+
+    /// Models reconstruct-terminal.ts's xterm shrink: drop rows below the
+    /// cursor first, then scroll top rows into history. vt100 set_size alone
+    /// truncates the bottom. Growth does not pull rows from scrollback.
+    pub fn resize(&mut self, columns: u16, rows: u16) {
+        assert!(columns > 0 && rows > 0);
+        let old_rows = self.parser.screen().size().0;
+        if rows < old_rows {
+            let scroll = (self.cursor().0 + 1).saturating_sub(rows);
+            if scroll > 0 {
+                self.parser.process(format!("\x1b[{scroll}S").as_bytes());
+            }
+        }
+        self.parser.screen_mut().set_size(rows, columns);
+        self.columns = columns;
     }
 
     pub fn rows(&self) -> Vec<String> {

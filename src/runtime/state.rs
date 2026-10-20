@@ -6,8 +6,8 @@ use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::Dirty;
 use super::output::{CursorPosition, WriteDestination};
+use super::{Dirty, WindowSize};
 
 /// Committed layout in integer cells, relative to the live tree's root.
 /// Coordinates exclude scrolling offsets and terminal viewport placement.
@@ -127,6 +127,7 @@ struct StateValue {
 }
 
 pub(super) struct Store {
+    pub(super) window_size: Cell<WindowSize>,
     pub(super) id: u64,
     pub(super) cursor: Cell<Option<CursorPosition>>,
     pub(super) destination: RefCell<Option<Rc<dyn WriteDestination>>>,
@@ -155,6 +156,10 @@ impl Drop for StateSlot {
 impl Store {
     pub(super) fn new() -> Rc<Self> {
         let store = Rc::new(Self {
+            window_size: Cell::new(WindowSize {
+                columns: 80,
+                rows: 24,
+            }),
             id: NEXT_RUNTIME.fetch_add(1, Ordering::Relaxed),
             cursor: Cell::new(None),
             destination: RefCell::new(None),

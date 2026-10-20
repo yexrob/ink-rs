@@ -267,6 +267,31 @@ fn issue_450_non_tty_overflow_transitions_should_never_clear_terminal() {
 }
 
 #[test]
+fn issue_450_viewport_shrink_into_overflow_should_clear_once() {
+    let terminal = TestTerminal::new(100, 6);
+    let mut app = mount(
+        View::new()
+            .height(6)
+            .flex_direction(FlexDirection::Column)
+            .child(Text::new("#450 top"))
+            .child(View::new().flex_grow(1.0).child(Text::new("#450 middle")))
+            .child(Text::new("#450 bottom")),
+        Options::default(),
+        &terminal,
+    );
+    let mut screen = Screen::new(&terminal, 100, 6);
+    let before = terminal.writes().len();
+    screen.resize(100, 5);
+    app.resize(100, 5);
+    app.advance(Duration::ZERO);
+    screen.update(&terminal);
+    let bytes = terminal.writes()[before..].join("");
+    assert_eq!(bytes.matches("\x1b[1;1H\x1b[J").count(), 1);
+    assert!(!bytes.contains("\x1b[2J"));
+    assert!(!bytes.contains("\x1b[3J"));
+}
+
+#[test]
 fn issue_450_non_tty_grow_to_overflow_rerender_should_not_clear_terminal() {
     let terminal = TestTerminal::new(100, 6).with_tty(false);
     let mut app = mount(component(fixture, 0), Options::default(), &terminal);
@@ -428,6 +453,49 @@ fn alternate_screen_replays_static_items_added_while_the_frame_overflows_once_st
         Screen::new(&terminal, 100, 5).rows(),
         ["S1", "S2", "S3", "live 0 tick 3", ""]
     );
+}
+
+#[test]
+fn update_trailing_newline_when_unchanged_output_becomes_fullscreen() {
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(Text::new("First\nSecond"), Options::default(), &terminal);
+    let mut screen = Screen::new(&terminal, 100, 24);
+    assert_eq!(&screen.rows()[..3], ["First", "Second", ""]);
+    assert_eq!(screen.cursor(), (2, 0));
+    screen.resize(100, 2);
+    app.resize(100, 2);
+    screen.update(&terminal);
+    assert_eq!(screen.rows(), ["First", "Second"]);
+    assert_eq!(screen.scrollback(), ["First"]);
+    assert_eq!(screen.cursor(), (1, 0));
+}
+
+#[test]
+fn rerender_on_resize() {
+    fn example(_: &mut Scope, _: &()) -> Element {
+        View::new()
+            .border_style(BorderStyle::Round)
+            .child(Text::new("Test"))
+            .into()
+    }
+    let terminal = TestTerminal::new(10, 24);
+    let mut app = mount(component(example, ()), Options::default(), &terminal);
+    let mut screen = Screen::new(&terminal, 10, 24);
+    assert_eq!(
+        &screen.rows()[..4],
+        ["╭────────╮", "│Test    │", "╰────────╯", ""]
+    );
+    screen.resize(8, 24);
+    app.resize(8, 24);
+    app.advance(Duration::from_millis(100));
+    screen.update(&terminal);
+    assert_eq!(
+        &screen.rows()[..4],
+        ["╭──────╮", "│Test  │", "╰──────╯", ""]
+    );
+    // Ink counts EventEmitter listeners; the driver polls events and unmount
+    // consumes TestApp, so its listener-count assertions have no counterpart.
+    app.unmount();
 }
 
 #[test]

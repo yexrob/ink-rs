@@ -39,8 +39,8 @@ pub use components::{Newline, Spacer, Static, Text, Transform, View};
 pub use element::{Element, Key, TextChild};
 pub use render::{RenderOptions, render_to_string};
 pub use runtime::{
-    CursorPosition, ElementMetrics, NodeRef, OutputStream, OutputWriter, Scope, State, component,
-    measure_element,
+    CursorPosition, ElementMetrics, NodeRef, OutputStream, OutputWriter, Scope, State, WindowSize,
+    component, measure_element,
 };
 pub use style::{
     AlignContent, AlignItems, AlignSelf, Dimension, Display, FlexDirection, FlexWrap, Inset,

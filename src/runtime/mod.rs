@@ -29,6 +29,26 @@ pub(crate) use output::WriteDestination;
 pub use output::{CursorPosition, OutputStream, OutputWriter};
 pub use state::{ElementMetrics, NodeRef, State, measure_element};
 
+/// Dimensions of the window in character cells.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WindowSize {
+    /// Number of columns.
+    pub columns: u16,
+    /// Number of rows.
+    pub rows: u16,
+}
+
+impl WindowSize {
+    pub(crate) fn resolve(size: Option<(u16, u16)>) -> Self {
+        let (columns, rows) = size.unwrap_or((0, 0));
+        // Ink utils.ts getWindowSize resolves unknown dimensions separately.
+        Self {
+            columns: if columns == 0 { 80 } else { columns },
+            rows: if rows == 0 { 24 } else { rows },
+        }
+    }
+}
+
 trait RenderComponent {
     fn render(&self, scope: &mut Scope) -> Element;
     fn same_props(&self, other: &dyn RenderComponent) -> bool;
@@ -159,6 +179,15 @@ struct Instance {
 }
 
 impl Instance {
+    fn invalidate_window_size(&self) {
+        if self.hooks.iter().any(|hook| hook.kind == Kind::WindowSize) {
+            self.dirty.mark();
+        }
+        for child in &self.children {
+            child.invalidate_window_size();
+        }
+    }
+
     fn new(element: Element, store: &Rc<Store>, parent: Weak<Dirty>) -> Self {
         Self {
             element,
@@ -194,6 +223,7 @@ impl Instance {
         // deletion effects and state detachment belong to the post-present phase.
         for hook in self.hooks.drain(..) {
             match hook.value {
+                Value::WindowSize => {}
                 Value::NodeRef { slot, .. } => drop(slot),
                 Value::State { slot, .. } => cleanups.states.push(Box::new(slot)),
                 Value::Effect(mut effect) => {
@@ -330,6 +360,7 @@ pub(crate) struct Runtime {
     options: RenderOptions,
     previous_static: Option<Rc<Dirty>>,
     static_changed: bool,
+    layout_pending: bool,
 }
 
 impl Runtime {
@@ -346,6 +377,10 @@ impl Runtime {
             false,
         );
         let store = Store::new();
+        store.window_size.set(WindowSize {
+            columns: options.columns,
+            rows: 24,
+        });
         Self {
             refs: BTreeMap::new(),
             tree,
@@ -360,7 +395,22 @@ impl Runtime {
             options,
             previous_static: None,
             static_changed: false,
+            layout_pending: false,
         }
+    }
+
+    pub(crate) fn resize(&mut self, size: WindowSize) {
+        if self.instance.store.window_size.replace(size) == size {
+            return;
+        }
+        if self.options.columns != size.columns {
+            self.options.columns = size.columns;
+            let mut props = self.tree.props(self.root).clone();
+            props.style.width = Dimension::Cells(size.columns);
+            host::set_props(&mut self.tree, self.root, props);
+        }
+        self.layout_pending = true;
+        self.instance.invalidate_window_size();
     }
 
     pub(crate) fn rerender(&mut self, element: Element) {
@@ -396,10 +446,11 @@ impl Runtime {
     }
 
     pub(crate) fn has_work(&self) -> bool {
-        self.next.is_some() || self.instance.dirty.pending()
+        self.layout_pending || self.next.is_some() || self.instance.dirty.pending()
     }
 
     pub(crate) fn commit(&mut self) -> Commit {
+        self.layout_pending = false;
         for round in 0..50 {
             {
                 let _guard = RenderGuard::enter();

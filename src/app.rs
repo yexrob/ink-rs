@@ -6,7 +6,7 @@ use crate::output::Output;
 use crate::paint::{Cell, Frame, serialize_row};
 use crate::runtime::{Runtime, WriteDestination};
 use crate::terminal::Terminal;
-use crate::{ColorLevel, CursorPosition, Element, OutputStream, RenderOptions};
+use crate::{ColorLevel, CursorPosition, Element, OutputStream, RenderOptions, WindowSize};
 
 /// Options for a live app, including [`crate::testing::mount`].
 #[derive(Clone, Copy, Debug)]
@@ -61,9 +61,22 @@ struct AppOutput {
 }
 
 impl AppOutput {
-    fn paint(&mut self, mut frame: Frame, cursor: Option<CursorPosition>) {
+    fn paint(
+        &mut self,
+        mut frame: Frame,
+        cursor: Option<CursorPosition>,
+        resize: Option<WindowSize>,
+    ) {
         let mut bytes = Vec::new();
         if self.interactive {
+            if let Some(previous) = resize {
+                self.output.resize(
+                    self.columns < usize::from(previous.columns),
+                    self.rows < usize::from(previous.rows),
+                    if self.tty { self.rows } else { usize::MAX },
+                    &mut bytes,
+                );
+            }
             let mut cursor = cursor.map(|position| (position.x, position.y));
             if self.alternate {
                 // Ink fullStaticOutput resets on identity changes. Copy at most
@@ -193,6 +206,7 @@ pub(crate) struct App {
     window: Duration,
     deadline: Option<Instant>,
     pending: bool,
+    resize_from: Option<WindowSize>,
 }
 
 impl App {
@@ -203,9 +217,8 @@ impl App {
         interactive: bool,
         color_level: ColorLevel,
     ) -> Self {
-        let (columns, rows) = terminal.size().unwrap_or((80, 24));
-        let columns = columns.max(1);
-        let rows = rows.max(1);
+        let size = WindowSize::resolve(terminal.size());
+        let WindowSize { columns, rows } = size;
         let tty = terminal.is_tty();
         let alternate = options.alternate_screen && interactive && tty;
         if alternate {
@@ -219,6 +232,7 @@ impl App {
                 color_level,
             },
         );
+        runtime.resize(size);
         let destination = Rc::new(RefCell::new(AppOutput {
             output: Output::new(),
             terminal,
@@ -243,7 +257,25 @@ impl App {
             }),
             deadline: None,
             pending: false,
+            resize_from: None,
         }
+    }
+
+    pub(crate) fn resize(&mut self, size: Option<(u16, u16)>) {
+        let Some(runtime) = &mut self.runtime else {
+            return;
+        };
+        let size = WindowSize::resolve(size);
+        let mut destination = self.destination.borrow_mut();
+        if self.interactive && self.resize_from.is_none() {
+            self.resize_from = Some(WindowSize {
+                columns: destination.columns as u16,
+                rows: destination.rows as u16,
+            });
+        }
+        destination.columns = usize::from(size.columns);
+        destination.rows = usize::from(size.rows);
+        runtime.resize(size);
     }
 
     pub(crate) fn rerender(&mut self, element: Element) {
@@ -258,9 +290,10 @@ impl App {
         if commit.is_some() {
             self.pending = true;
         }
-        let immediate = commit.as_ref().is_some_and(|commit| {
-            commit.static_items || (self.interactive && commit.static_changed)
-        });
+        let immediate = self.resize_from.is_some()
+            || commit.as_ref().is_some_and(|commit| {
+                commit.static_items || (self.interactive && commit.static_changed)
+            });
         let due = self.interactive
             && self.pending
             && self.deadline.is_none_or(|deadline| now >= deadline);
@@ -291,7 +324,9 @@ impl App {
     fn paint(&mut self) {
         let runtime = self.runtime.as_mut().unwrap();
         let frame = runtime.paint();
-        self.destination.borrow_mut().paint(frame, runtime.cursor());
+        self.destination
+            .borrow_mut()
+            .paint(frame, runtime.cursor(), self.resize_from.take());
         self.pending = false;
     }
 
