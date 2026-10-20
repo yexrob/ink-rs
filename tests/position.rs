@@ -121,3 +121,60 @@ fn static_position_ignores_percentage_offsets() {
     );
     assert_eq!(output, "AB");
 }
+
+#[test]
+fn clears_top_offset_on_rerender() {
+    fn example(_: &mut Scope, value: &bool) -> Element {
+        let mut child = View::new().position(Position::Absolute).left(2);
+        if *value {
+            child = child.top(1);
+        }
+        View::new()
+            .width(5)
+            .height(3)
+            .child(child.child(Text::new("X")))
+            .into()
+    }
+    let mut instance = testing::render(component(example, true));
+    assert_ansi_eq(instance.last_frame(), &lines(&["", "  X", ""]));
+    instance.rerender(component(example, false));
+    assert_ansi_eq(instance.last_frame(), &lines(&["  X", "", ""]));
+}
+
+#[test]
+fn clears_percentage_top_and_left_offsets_on_rerender() {
+    fn example(_: &mut Scope, value: &bool) -> Element {
+        let mut child = View::new().position(Position::Absolute);
+        if *value {
+            child = child.top(Percent(50.0)).left(Percent(50.0));
+        }
+        View::new()
+            .width(6)
+            .height(4)
+            .child(child.child(Text::new("X")))
+            .into()
+    }
+    let mut instance = testing::render(component(example, true));
+    assert_ansi_eq(instance.last_frame(), &lines(&["", "", "   X", ""]));
+    instance.rerender(component(example, false));
+    assert_ansi_eq(instance.last_frame(), &lines(&["X", "", "", ""]));
+}
+
+#[test]
+fn clears_bottom_and_right_offsets_on_rerender() {
+    fn example(_: &mut Scope, value: &bool) -> Element {
+        let mut child = View::new().position(Position::Absolute);
+        if *value {
+            child = child.bottom(1).right(1);
+        }
+        View::new()
+            .width(6)
+            .height(4)
+            .child(child.child(Text::new("X")))
+            .into()
+    }
+    let mut instance = testing::render(component(example, true));
+    assert_ansi_eq(instance.last_frame(), &lines(&["", "", "    X", ""]));
+    instance.rerender(component(example, false));
+    assert_ansi_eq(instance.last_frame(), &lines(&["X", "", "", ""]));
+}

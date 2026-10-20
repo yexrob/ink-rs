@@ -30,38 +30,38 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `alternate-screen-example.tsx` | 2 | M4 |  |  |
 | `ansi-newlines.tsx` | 9 | M0 | 9 | `tests/ansi_newlines.rs` |
 | `ansi-tokenizer.ts` | 26 | M0 | 26 | `src/text/ansi/tests.rs` |
-| `background.tsx` | 32 | M0 | 24 | `tests/background.rs` |
+| `background.tsx` | 32 | M0 / M1 | 27 | `tests/background.rs` |
 | `border-backgrounds.tsx` | 5 | M0 | 5 | `tests/border_backgrounds.rs` |
-| `borders.tsx` | 52 | M0 | 46 | `tests/borders.rs` |
+| `borders.tsx` | 52 | M0 / M1 | 48 | `tests/borders.rs` |
 | `build-output.ts` | 4 | — |  |  |
 | `c1-rendering.tsx` | 8 | M0 | 8 | `tests/c1_rendering.rs` |
 | `clear-rerender.tsx` | 9 | M2 |  |  |
 | `clip-wide-background.tsx` | 10 | M0 | 10 | `tests/clip_wide_background.rs` |
 | `colon-colors.tsx` | 16 | M0 | 16 | `tests/colon_colors.rs` |
 | `colorize.ts` | 16 | M0 | 16 | `tests/colorize.rs` |
-| `component-regressions.tsx` | 4 | M1 |  |  |
-| `components.tsx` | 93 | M0 / M1 | 38 | `tests/components.rs` |
+| `component-regressions.tsx` | 4 | M1 | 2 | `tests/component_regressions.rs` |
+| `components.tsx` | 93 | M0 / M1 | 41 | `tests/components.rs` |
 | `content-offset.tsx` | 23 | M0 | 24 | `tests/content_offset.rs` |
 | `cursor-exit-position.tsx` | 6 | M2 |  |  |
 | `cursor-helpers.tsx` | 17 | M2 |  |  |
 | `cursor.tsx` | 20 | M2 |  |  |
-| `display.tsx` | 6 | M0 | 2 | `tests/display.rs` |
+| `display.tsx` | 6 | M0 / M1 | 4 | `tests/display.rs` |
 | `error-overview.tsx` | 7 | M4 |  |  |
 | `errors.tsx` | 8 | M4 |  |  |
 | `exit-keyboard.tsx` | 7 | M3 |  |  |
 | `exit.tsx` | 15 | M3 |  |  |
-| `flex-align-content.tsx` | 13 | M0 | 9 | `tests/flex_align_content.rs` |
+| `flex-align-content.tsx` | 13 | M0 / M1 | 11 | `tests/flex_align_content.rs` |
 | `flex-align-items.tsx` | 9 | M0 | 9 | `tests/flex_align_items.rs` |
 | `flex-align-self.tsx` | 9 | M0 | 9 | `tests/flex_align_self.rs` |
-| `flex-direction.tsx` | 10 | M0 | 6 | `tests/flex_direction.rs` |
+| `flex-direction.tsx` | 10 | M0 / M1 | 7 | `tests/flex_direction.rs` |
 | `flex-justify-content.tsx` | 12 | M0 | 12 | `tests/flex_justify_content.rs` |
-| `flex-wrap.tsx` | 8 | M0 | 6 | `tests/flex_wrap.rs` |
+| `flex-wrap.tsx` | 8 | M0 / M1 | 8 | `tests/flex_wrap.rs` |
 | `flex.tsx` | 8 | M0 | 8 | `tests/flex.rs` |
 | `focus-empty-id-regression.tsx` | 3 | M3 |  |  |
 | `focus-order.tsx` | 3 | M3 |  |  |
 | `focus-strict-mode.tsx` | 4 | M3 |  |  |
 | `focus.tsx` | 47 | M3 |  |  |
-| `gap.tsx` | 8 | M0 | 3 | `tests/gap.rs` |
+| `gap.tsx` | 8 | M0 / M1 | 5 | `tests/gap.rs` |
 | `hooks-use-input-kitty.tsx` | 24 | M3 |  |  |
 | `hooks-use-input-navigation.tsx` | 18 | M3 |  |  |
 | `hooks-use-input.tsx` | 34 | M3 |  |  |
@@ -79,15 +79,15 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `log-update-columns.tsx` | 8 | M2 |  |  |
 | `log-update-sparse.ts` | 9 | M2 |  |  |
 | `log-update.tsx` | 52 | M2 |  |  |
-| `margin.tsx` | 15 | M0 | 12 | `tests/margin.rs` |
+| `margin.tsx` | 15 | M0 / M1 | 13 | `tests/margin.rs` |
 | `measure-element.tsx` | 13 | M1 |  |  |
 | `measure-text.tsx` | 13 | M0 | 11 | `src/text/measure/tests.rs` |
 | `overflow.tsx` | 44 | M0 | 40 | `tests/overflow.rs` |
 | `overlap-wide-background.tsx` | 7 | M0 | 7 | `tests/overlap_wide_background.rs` |
-| `padding.tsx` | 16 | M0 | 12 | `tests/padding.rs` |
+| `padding.tsx` | 16 | M0 / M1 | 14 | `tests/padding.rs` |
 | `parse-keypress.ts` | 27 | M3 |  |  |
-| `position.tsx` | 13 | M0 | 8 | `tests/position.rs` |
-| `reconciler.tsx` | 14 | M1 |  |  |
+| `position.tsx` | 13 | M0 / M1 | 11 | `tests/position.rs` |
+| `reconciler.tsx` | 14 | M1 | 7 | `tests/reconciler.rs` |
 | `render-callback.tsx` | 4 | M2 |  |  |
 | `render-to-string.tsx` | 37 | M0 / M1 | 32 | `tests/render_to_string.rs` |
 | `render.tsx` | 119 | M2 |  |  |
@@ -102,7 +102,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `static-string-replacement.tsx` | 4 | M1 | 4 | `tests/static_string_replacement.rs` |
 | `static-trailing-layout.tsx` | 7 | M0 | 7 | `tests/static_trailing_layout.rs` |
 | `style-types.ts` | 1 | — |  |  |
-| `style-update-consistency.tsx` | 15 | M1 |  |  |
+| `style-update-consistency.tsx` | 15 | M1 | 15 | `tests/style_update_consistency.rs` |
 | `styled-combining-marks.tsx` | 9 | M0 | 9 | `tests/styled_combining_marks.rs` |
 | `styles.ts` | 17 | — |  |  |
 | `suspend-terminal.tsx` | 14 | M4 |  |  |
@@ -114,12 +114,12 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `terminal-resize.tsx` | 28 | M2 |  |  |
 | `text-controls.tsx` | 24 | M0 | 24 | `tests/text_controls.rs`, `src/text/sanitize/tests.rs` |
 | `text-width.tsx` | 18 | M0 | 18 | `tests/text_width.rs` |
-| `text.tsx` | 57 | M0 | 46 | `tests/text.rs` |
+| `text.tsx` | 57 | M0 / M1 | 49 | `tests/text.rs` |
 | `truncate-width.tsx` | 9 | M0 | 9 | `tests/truncate_width.rs` |
 | `use-animation.tsx` | 45 | M4 |  |  |
 | `use-box-metrics.tsx` | 19 | M4 |  |  |
-| `width-height.tsx` | 29 | M0 | 22 | `tests/width_height.rs` |
-| `wrap-text.tsx` | 17 | M0 | 14 | `tests/wrap_text.rs`, `src/text/wrap/tests.rs` |
+| `width-height.tsx` | 29 | M0 / M1 | 25 | `tests/width_height.rs` |
+| `wrap-text.tsx` | 17 | M0 / M1 | 15 | `tests/wrap_text.rs`, `src/text/wrap/tests.rs` |
 | `write-synchronized.tsx` | 7 | M2 |  |  |
 
 ## M0 文件中未移植的测试
@@ -128,19 +128,19 @@ Ink 有 95 个测试文件、1,646 个测试。
 
 ### `background.tsx`
 
-- M1：`Box preserves child state when adding a background color`、`Box preserves child state when removing a background color`、`Box background updates on rerender`
+- M1 已移植：`Box preserves child state when adding a background color`、`Box preserves child state when removing a background color`、`Box background updates on rerender`
 - 缺 API：`Mixed text with and without background inheritance`
 - 并发：`Text inherits parent Box background color`、`Nested Box background inheritance`、`Box background with hex color`、`Box background updates on rerender`
 
 ### `borders.tsx`
 
-- M1：`render border after update`、`render border edge changes after update when borderStyle is unchanged`
+- M1 已移植：`render border after update`、`render border edge changes after update when borderStyle is unchanged`
 - 并发：`single node - full width box`、`single node - fit-content box`、`nested boxes`、`render border after update`
 
 ### `components.tsx`
 
 - M1 已移植：`hooks`
-- M1：`remeasure text dimensions on text change`、`replace child node with text`、`reset prop when it’s removed from the element`
+- M1 已移植：`remeasure text dimensions on text change`、`replace child node with text`、`reset prop when it’s removed from the element`
 - M2，Static 跨帧：`static padding is not emitted again when there are no new items`、`skip previous output when rendering new static output`、`static output stops accumulating after Static unmounts (#904)`、`fullStaticOutput is reset when <Static> unmounts so stale items are not replayed`、`unmounting an ancestor of <Static> clears staticNode and does not crash the renderer`、`removing a <Static> ancestor that is a direct child of the root does not crash`、`separate Ink instances do not clobber each other’s staticNode`、`updating <Static> in one instance after another instance mounted <Static> sets the dirty flag on the correct root`、`remounting <Static> via key change emits the new items (nested under <Box>)`、`remounting <Static> via key change emits the new items (root-level — removeChildFromContainer)`、`render only new items in static output on final render`
 - M2，非 TTY / CI：`render only last frame when run in CI`、`render all frames if CI environment variable equals false`、`debug mode in CI does not replay final frame during unmount teardown`、`debug mode in CI keeps final newline separation after waitUntilExit`、`render only last frame when stdout is not a TTY`、`render all frames when interactive is explicitly true`、`interactive option overrides TTY detection`、`static output is written immediately in non-interactive mode`
 - M2，备用屏幕与卸载：`alternate screen - enters on mount and exits on unmount`、`primary screen - cleanup console output follows the native console during unmount`、`alternate screen - does not replay exit(Error) output on the primary screen during unmount`、`alternate screen - does not replay teardown output on the primary screen during unmount`、`alternate screen - cleanup console output follows the native console during unmount`、`alternate screen - cleanup() exits the alternate screen`、`alternate screen - debug concurrent teardown restores the cursor before the first commit`、`render warns when stdout is reused before unmount`、`alternate screen - ignored when non-interactive`、`alternate screen - disabled by default`、`alternate screen - content is rendered between enter and exit`、`alternate screen - ignored when isTTY is false`、`alternate screen - ignored when isTTY is false even if interactive is true`
@@ -155,33 +155,33 @@ Ink 有 95 个测试文件、1,646 个测试。
 
 ### `display.tsx`
 
-- M1：`removing display="none" restores the default layout`、`removing display="flex" restores the default layout`
+- M1 已移植：`removing display="none" restores the default layout`、`removing display="flex" restores the default layout`
 - 并发：`display flex`、`display none`
 
 ### `flex-align-content.tsx`
 
-- M1：`clears alignContent on rerender to default flex-start`、`clears alignContent from stretch on rerender to default flex-start`
+- M1 已移植：`clears alignContent on rerender to default flex-start`、`clears alignContent from stretch on rerender to default flex-start`
 - 不适用：`clears alignContent when prop is omitted on rerender`。它与第一个用例的差别是 JS 中缺少的键与值为 `undefined` 的键，Rust 里两者是同一个测试。
 - 并发：`align content center`
 
 ### `flex-direction.tsx`
 
-- M1：`setting direction to undefined restores the default row layout`
+- M1 已移植：`setting direction to undefined restores the default row layout`
 - M5：`undefined direction uses row separators for screen readers`
 - 并发：`direction row`、`direction column`
 
 ### `flex-wrap.tsx`
 
-- M1：`setting wrap to undefined restores nowrap`、`setting wrap-reverse to undefined restores nowrap`
+- M1 已移植：`setting wrap to undefined restores nowrap`、`setting wrap-reverse to undefined restores nowrap`
 
 ### `gap.tsx`
 
-- M1：`removing columnGap restores gap on rerender`、`removing rowGap restores gap on rerender`
+- M1 已移植：`removing columnGap restores gap on rerender`、`removing rowGap restores gap on rerender`
 - 并发：`gap`、`column gap`、`row gap`
 
 ### `margin.tsx`
 
-- M1：`removing marginLeft restores marginX on rerender`
+- M1 已移植：`removing marginLeft restores marginX on rerender`
 - 并发：`margin`、`nested margin`
 
 ### `measure-text.tsx`
@@ -194,12 +194,12 @@ Ink 有 95 个测试文件、1,646 个测试。
 
 ### `padding.tsx`
 
-- M1：`removing paddingLeft restores paddingX on rerender`、`removing paddingX restores padding on rerender`
+- M1 已移植：`removing paddingLeft restores paddingX on rerender`、`removing paddingX restores padding on rerender`
 - 并发：`padding`、`nested padding`
 
 ### `position.tsx`
 
-- M1：`clears top offset on rerender`、`clears percentage top and left offsets on rerender`、`clears bottom and right offsets on rerender`
+- M1 已移植：`clears top offset on rerender`、`clears percentage top and left offsets on rerender`、`clears bottom and right offsets on rerender`
 - 不适用：`clears percentage top and left offsets when props are omitted on rerender`，原因同 `flex-align-content.tsx`。
 - 并发：`absolute position with top and left offsets`
 
@@ -211,18 +211,18 @@ Ink 有 95 个测试文件、1,646 个测试。
 
 ### `text.tsx`
 
-- M1：`text with empty-to-nonempty sibling does not wrap`、`remeasure text when text is changed`、`remeasure text when text nodes are changed`
+- M1 已移植：`text with empty-to-nonempty sibling does not wrap`、`remeasure text when text is changed`、`remeasure text when text nodes are changed`
 - 并发：`<Text> with undefined children`、`<Text> with null children`、`text with standard color`、`text with dim+bold`、`text with hex color`、`text with inversion`、`remeasure text when text is changed`、`remeasure text when text nodes are changed`
 
 ### `width-height.tsx`
 
-- M1：`clears maxWidth on rerender`、`clears maxHeight on rerender`、`clears aspectRatio on rerender`
+- M1 已移植：`clears maxWidth on rerender`、`clears maxHeight on rerender`、`clears aspectRatio on rerender`
 - 不适用：`set width to a fraction of a column`、`truncated text at a positive fractional width keeps its row`。宽度的类型是整数格。
 - 并发：`set width`、`set height`
 
 ### `wrap-text.tsx`
 
-- M1：`changing text wrapping recalculates the container height`
+- M1 已移植：`changing text wrapping recalculates the container height`
 - 不适用：`wraps a fraction of a column like one column`（宽度是整数格）、`evicts old cached results`（缓存的内部状态）
 - 移植了一部分：`keeps text at its natural width when there is no room to wrap` 缺宽度 `-1` 的断言，无符号宽度表示不了；`uses separate cache entries for texts that end with digits` 和 `does not reuse a cached result from a wider box` 保留输出断言，去掉清缓存的步骤。
 

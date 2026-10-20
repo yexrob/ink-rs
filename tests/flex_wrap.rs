@@ -42,6 +42,40 @@ fn row_wrap_content() {
 }
 
 #[test]
+fn setting_wrap_to_undefined_restores_nowrap() {
+    fn example(_: &mut Scope, value: &Option<FlexWrap>) -> Element {
+        let mut view = View::new().width(3);
+        if let Some(wrap) = value {
+            view = view.flex_wrap(*wrap);
+        }
+        view.child(View::new().flex_shrink(0.0).child(Text::new("AB")))
+            .child(View::new().flex_shrink(0.0).child(Text::new("CD")))
+            .into()
+    }
+    let mut instance = testing::render(component(example, Some(FlexWrap::Wrap)));
+    assert_ansi_eq(instance.last_frame(), &lines(&["AB", "CD"]));
+    instance.rerender(component(example, None));
+    assert_ansi_eq(instance.last_frame(), "ABCD");
+}
+
+#[test]
+fn setting_wrap_reverse_to_undefined_restores_nowrap() {
+    fn example(_: &mut Scope, value: &Option<FlexWrap>) -> Element {
+        let mut view = View::new().width(3);
+        if let Some(wrap) = value {
+            view = view.flex_wrap(*wrap);
+        }
+        view.child(View::new().flex_shrink(0.0).child(Text::new("AB")))
+            .child(View::new().flex_shrink(0.0).child(Text::new("CD")))
+            .into()
+    }
+    let mut instance = testing::render(component(example, Some(FlexWrap::WrapReverse)));
+    assert_ansi_eq(instance.last_frame(), &lines(&["CD", "AB"]));
+    instance.rerender(component(example, None));
+    assert_ansi_eq(instance.last_frame(), "ABCD");
+}
+
+#[test]
 fn column_wrap_content() {
     let output = render(
         View::new()

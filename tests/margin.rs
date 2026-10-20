@@ -22,6 +22,26 @@ fn margin_x() {
 }
 
 #[test]
+fn removing_margin_left_restores_margin_x_on_rerender() {
+    fn example(_: &mut Scope, value: &Option<i16>) -> Element {
+        let mut child = View::new().margin_x(2);
+        if let Some(left) = value {
+            child = child.margin_left(*left);
+        }
+        View::new()
+            .child(child.child(Text::new("X")))
+            .child(Text::new("Y"))
+            .into()
+    }
+    let mut instance = testing::render(component(example, Some(1)));
+    assert_ansi_eq(instance.last_frame(), " X  Y");
+    instance.rerender(component(example, None));
+    assert_ansi_eq(instance.last_frame(), "  X  Y");
+    instance.rerender(component(example, Some(0)));
+    assert_ansi_eq(instance.last_frame(), "X  Y");
+}
+
+#[test]
 fn margin_y() {
     let output = render(View::new().margin_y(2).child(Text::new("X")));
     assert_eq!(output, lines(&["", "", "X", "", "",]));

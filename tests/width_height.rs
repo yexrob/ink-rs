@@ -187,6 +187,24 @@ fn set_max_width() {
 }
 
 #[test]
+fn clears_max_width_on_rerender() {
+    fn example(_: &mut Scope, value: &bool) -> Element {
+        let mut child = View::new();
+        if *value {
+            child = child.max_width(3);
+        }
+        View::new()
+            .child(child.child(Text::new("AAAAA")))
+            .child(Text::new("B"))
+            .into()
+    }
+    let mut instance = testing::render(component(example, true));
+    assert_ansi_eq(instance.last_frame(), &lines(&["AAAB", "AA"]));
+    instance.rerender(component(example, false));
+    assert_ansi_eq(instance.last_frame(), "AAAAAB");
+}
+
+#[test]
 fn set_max_height() {
     let constrained_output = render(
         View::new()
@@ -196,6 +214,22 @@ fn set_max_height() {
     assert_eq!(constrained_output, lines(&["A", "",]));
     let unconstrained_output = render(View::new().max_height(4).child(Text::new("A")));
     assert_eq!(unconstrained_output, "A");
+}
+
+#[test]
+fn clears_max_height_on_rerender() {
+    fn example(_: &mut Scope, value: &bool) -> Element {
+        let mut view = View::new();
+        if *value {
+            view = view.max_height(2);
+        }
+        view.child(View::new().height(4).child(Text::new("A")))
+            .into()
+    }
+    let mut instance = testing::render(component(example, true));
+    assert_ansi_eq(instance.last_frame(), &lines(&["A", ""]));
+    instance.rerender(component(example, false));
+    assert_ansi_eq(instance.last_frame(), &lines(&["A", "", "", ""]));
 }
 
 #[test]
@@ -269,6 +303,31 @@ fn set_aspect_ratio_with_max_height_constraint() {
             .child(Text::new("Y")),
     );
     assert_eq!(output, lines(&["┌────┐", "│X   │", "└────┘", "Y",]));
+}
+
+#[test]
+fn clears_aspect_ratio_on_rerender() {
+    fn example(_: &mut Scope, value: &bool) -> Element {
+        let mut child = View::new().width(8).border_style(BorderStyle::Single);
+        if *value {
+            child = child.aspect_ratio(2.0);
+        }
+        View::new()
+            .flex_direction(FlexDirection::Column)
+            .child(child.child(Text::new("X")))
+            .child(Text::new("Y"))
+            .into()
+    }
+    let mut instance = testing::render(component(example, true));
+    assert_ansi_eq(
+        instance.last_frame(),
+        &lines(&["┌──────┐", "│X     │", "│      │", "└──────┘", "Y"]),
+    );
+    instance.rerender(component(example, false));
+    assert_ansi_eq(
+        instance.last_frame(),
+        &lines(&["┌──────┐", "│X     │", "└──────┘", "Y"]),
+    );
 }
 
 #[test]

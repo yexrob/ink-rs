@@ -23,6 +23,21 @@ fn undefined_direction_uses_the_default_row_layout() {
 }
 
 #[test]
+fn setting_direction_to_undefined_restores_the_default_row_layout() {
+    fn example(_: &mut Scope, value: &Option<FlexDirection>) -> Element {
+        let mut view = View::new();
+        if let Some(direction) = value {
+            view = view.flex_direction(*direction);
+        }
+        view.child(Text::new("A")).child(Text::new("B")).into()
+    }
+    let mut instance = testing::render(component(example, Some(FlexDirection::Column)));
+    assert_ansi_eq(instance.last_frame(), &lines(&["A", "B"]));
+    instance.rerender(component(example, None));
+    assert_ansi_eq(instance.last_frame(), "AB");
+}
+
+#[test]
 fn direction_row_reverse() {
     let output = render(
         View::new()

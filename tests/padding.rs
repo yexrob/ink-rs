@@ -22,6 +22,41 @@ fn padding_x() {
 }
 
 #[test]
+fn removing_padding_left_restores_padding_x_on_rerender() {
+    fn example(_: &mut Scope, value: &Option<u16>) -> Element {
+        let mut child = View::new().padding_x(2);
+        if let Some(left) = value {
+            child = child.padding_left(*left);
+        }
+        View::new()
+            .child(child.child(Text::new("X")))
+            .child(Text::new("Y"))
+            .into()
+    }
+    let mut instance = testing::render(component(example, Some(1)));
+    assert_ansi_eq(instance.last_frame(), " X  Y");
+    instance.rerender(component(example, None));
+    assert_ansi_eq(instance.last_frame(), "  X  Y");
+    instance.rerender(component(example, Some(0)));
+    assert_ansi_eq(instance.last_frame(), "X  Y");
+}
+
+#[test]
+fn removing_padding_x_restores_padding_on_rerender() {
+    fn example(_: &mut Scope, value: &Option<u16>) -> Element {
+        let mut view = View::new().padding(2);
+        if let Some(x) = value {
+            view = view.padding_x(*x);
+        }
+        view.child(Text::new("X")).into()
+    }
+    let mut instance = testing::render(component(example, Some(1)));
+    assert_ansi_eq(instance.last_frame(), &lines(&["", "", " X", "", ""]));
+    instance.rerender(component(example, None));
+    assert_ansi_eq(instance.last_frame(), &lines(&["", "", "  X", "", ""]));
+}
+
+#[test]
 fn padding_y() {
     let output = render(View::new().padding_y(2).child(Text::new("X")));
     assert_eq!(output, lines(&["", "", "X", "", "",]));

@@ -6,6 +6,46 @@ use common::*;
 use ink_rs::*;
 
 #[test]
+fn box_preserves_child_state_when_adding_a_background_color() {
+    fn child(cx: &mut Scope, initial: &&'static str) -> Element {
+        let value = cx.use_state(|| *initial);
+        Text::new(value.get()).into()
+    }
+    let view = |background, initial| {
+        let mut view = View::new();
+        if background {
+            view = view.background_color(Color::Red);
+        }
+        view.child(component(child, initial))
+    };
+    let mut instance = testing::render(view(false, "original"));
+    assert!(instance.last_frame().contains("original"));
+    instance.rerender(view(true, "reset"));
+    assert!(instance.last_frame().contains("original"));
+    assert!(!instance.last_frame().contains("reset"));
+}
+
+#[test]
+fn box_preserves_child_state_when_removing_a_background_color() {
+    fn child(cx: &mut Scope, initial: &&'static str) -> Element {
+        let value = cx.use_state(|| *initial);
+        Text::new(value.get()).into()
+    }
+    let view = |background, initial| {
+        let mut view = View::new();
+        if background {
+            view = view.background_color(Color::Red);
+        }
+        view.child(component(child, initial))
+    };
+    let mut instance = testing::render(view(true, "original"));
+    assert!(instance.last_frame().contains("original"));
+    instance.rerender(view(false, "reset"));
+    assert!(instance.last_frame().contains("original"));
+    assert!(!instance.last_frame().contains("reset"));
+}
+
+#[test]
 fn static_background_color_is_inherited_by_its_text() {
     let output = render_truecolor(
         Static::new(vec!["A"], |item, _| Text::new(*item).into())
@@ -367,6 +407,29 @@ fn box_background_with_column_layout_fills_entire_area() {
             "{bg=green}          {/}",
         ]),
     );
+}
+
+#[test]
+fn box_background_updates_on_rerender() {
+    fn example(_: &mut Scope, value: &Option<Color>) -> Element {
+        let mut view = View::new().align_self(AlignSelf::FlexStart);
+        if let Some(color) = value {
+            view = view.background_color(*color);
+        }
+        view.child(Text::new("Hello")).into()
+    }
+    let mut instance = testing::render_with(
+        component(example, None),
+        RenderOptions {
+            columns: 100,
+            color_level: ColorLevel::TrueColor,
+        },
+    );
+    assert_ansi_eq(instance.last_frame(), "Hello");
+    instance.rerender(component(example, Some(Color::Green)));
+    assert_ansi_eq(instance.last_frame(), &styled(&["{bg=green}Hello{/}"]));
+    instance.rerender(component(example, None));
+    assert_ansi_eq(instance.last_frame(), "Hello");
 }
 
 #[test]

@@ -6,6 +6,36 @@ use common::*;
 use ink_rs::*;
 
 #[test]
+fn changing_text_wrapping_recalculates_the_container_height() {
+    fn example(_: &mut Scope, value: &bool) -> Element {
+        View::new()
+            .width(7)
+            .border_style(BorderStyle::Single)
+            .child(Text::new("abcdefghij").wrap(if *value {
+                TextWrap::TruncateEnd
+            } else {
+                TextWrap::Wrap
+            }))
+            .into()
+    }
+    let mut instance = testing::render(component(example, false));
+    assert_ansi_eq(
+        instance.last_frame(),
+        &lines(&["┌─────┐", "│abcde│", "│fghij│", "└─────┘"]),
+    );
+    instance.rerender(component(example, true));
+    assert_ansi_eq(
+        instance.last_frame(),
+        &lines(&["┌─────┐", "│abcd…│", "└─────┘"]),
+    );
+    instance.rerender(component(example, false));
+    assert_ansi_eq(
+        instance.last_frame(),
+        &lines(&["┌─────┐", "│abcde│", "│fghij│", "└─────┘"]),
+    );
+}
+
+#[test]
 fn truncated_multi_line_text_keeps_its_lines_in_the_layout() {
     let output = render(
         View::new()

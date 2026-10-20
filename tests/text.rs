@@ -163,6 +163,45 @@ fn text_with_inversion() {
 }
 
 #[test]
+fn text_with_empty_to_nonempty_sibling_does_not_wrap() {
+    fn example(_: &mut Scope, value: &bool) -> Element {
+        View::new()
+            .child(Text::new(if *value { "x" } else { "" }).child("hello"))
+            .into()
+    }
+    let mut instance = testing::render(component(example, false));
+    assert_ansi_eq(instance.last_frame(), "hello");
+    instance.rerender(component(example, true));
+    assert_ansi_eq(instance.last_frame(), "xhello");
+}
+
+#[test]
+fn remeasure_text_when_text_is_changed() {
+    fn example(_: &mut Scope, value: &bool) -> Element {
+        View::new()
+            .child(Text::new(if *value { "abcx" } else { "abc" }))
+            .into()
+    }
+    let mut instance = testing::render(component(example, false));
+    assert_ansi_eq(instance.last_frame(), "abc");
+    instance.rerender(component(example, true));
+    assert_ansi_eq(instance.last_frame(), "abcx");
+}
+
+#[test]
+fn remeasure_text_when_text_nodes_are_changed() {
+    fn example(_: &mut Scope, value: &bool) -> Element {
+        View::new()
+            .child(Text::new("abc").child(Element::from(value.then(|| Text::new("x")))))
+            .into()
+    }
+    let mut instance = testing::render(component(example, false));
+    assert_ansi_eq(instance.last_frame(), "abc");
+    instance.rerender(component(example, true));
+    assert_ansi_eq(instance.last_frame(), "abcx");
+}
+
+#[test]
 fn text_with_content_constructor_wraps_correctly() {
     let output = render(Text::new("constructor"));
     assert_eq!(output, "constructor");

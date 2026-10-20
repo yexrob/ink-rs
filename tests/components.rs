@@ -241,6 +241,14 @@ fn fail_when_box_is_inside_text_component() {
 }
 
 #[test]
+fn remeasure_text_dimensions_on_text_change() {
+    let mut instance = testing::render(View::new().child(Text::new("Hello")));
+    assert_eq!(instance.last_frame(), "Hello");
+    instance.rerender(View::new().child(Text::new("Hello World")));
+    assert_eq!(instance.last_frame(), "Hello World");
+}
+
+#[test]
 fn fragment() {
     let output = render(Element::fragment([Text::new("Hello World")]));
     assert_eq!(output, "Hello World");
@@ -338,6 +346,38 @@ fn static_output() {
 fn ensure_wrap_ansi_doesnt_trim_leading_whitespace() {
     let output = render(Text::new(" ERROR ").color(Color::Red));
     assert_ansi_eq(&output, &styled(&["{fg=red} ERROR {/}"]));
+}
+
+#[test]
+fn replace_child_node_with_text() {
+    fn example(_: &mut Scope, value: &bool) -> Element {
+        if *value {
+            Text::new("x").into()
+        } else {
+            Text::new(Text::new("test").color(Color::Green)).into()
+        }
+    }
+    let mut instance = testing::render(component(example, false));
+    assert_ansi_eq(instance.last_frame(), &styled(&["{fg=green}test{/}"]));
+    instance.rerender(component(example, true));
+    assert_ansi_eq(instance.last_frame(), "x");
+}
+
+#[test]
+fn reset_prop_when_it_s_removed_from_the_element() {
+    fn example(_: &mut Scope, value: &bool) -> Element {
+        let mut view = View::new()
+            .flex_direction(FlexDirection::Column)
+            .justify_content(JustifyContent::FlexEnd);
+        if !*value {
+            view = view.height(4);
+        }
+        view.child(Text::new("x")).into()
+    }
+    let mut instance = testing::render(component(example, false));
+    assert_ansi_eq(instance.last_frame(), &lines(&["", "", "", "x"]));
+    instance.rerender(component(example, true));
+    assert_ansi_eq(instance.last_frame(), "x");
 }
 
 #[test]

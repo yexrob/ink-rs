@@ -645,6 +645,69 @@ fn nested_boxes_fit_content_box_with_emojis_on_flex_direction_column() {
 }
 
 #[test]
+fn render_border_after_update() {
+    fn example(_: &mut Scope, value: &Option<Color>) -> Element {
+        let mut view = View::new().border_style(BorderStyle::Round);
+        if let Some(color) = value {
+            view = view.border_color(*color);
+        }
+        view.child(Text::new("Hello World")).into()
+    }
+    let mut instance = testing::render(component(example, None));
+    assert_ansi_eq(
+        instance.last_frame(),
+        &lines(&[
+            "╭──────────────────────────────────────────────────────────────────────────────────────────────────╮",
+            "│Hello World                                                                                       │",
+            "╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+        ]),
+    );
+    instance.rerender(component(example, Some(Color::Green)));
+    assert_ansi_eq(
+        instance.last_frame(),
+        &styled(&[
+            "{fg=green}╭──────────────────────────────────────────────────────────────────────────────────────────────────╮{/}",
+            "{fg=green}│{/}Hello World                                                                                       {fg=green}│{/}",
+            "{fg=green}╰──────────────────────────────────────────────────────────────────────────────────────────────────╯{/}",
+        ]),
+    );
+    instance.rerender(component(example, None));
+    assert_ansi_eq(
+        instance.last_frame(),
+        &lines(&[
+            "╭──────────────────────────────────────────────────────────────────────────────────────────────────╮",
+            "│Hello World                                                                                       │",
+            "╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+        ]),
+    );
+}
+
+#[test]
+fn render_border_edge_changes_after_update_when_border_style_is_unchanged() {
+    fn example(_: &mut Scope, value: &Option<bool>) -> Element {
+        let mut view = View::new()
+            .border_style(BorderStyle::Round)
+            .align_self(AlignSelf::FlexStart);
+        if let Some(top) = value {
+            view = view.border_top(*top);
+        }
+        view.child(Text::new("Content")).into()
+    }
+    let mut instance = testing::render(component(example, None));
+    assert_ansi_eq(
+        instance.last_frame(),
+        &lines(&["╭───────╮", "│Content│", "╰───────╯"]),
+    );
+    instance.rerender(component(example, Some(false)));
+    assert_ansi_eq(instance.last_frame(), &lines(&["│Content│", "╰───────╯"]));
+    instance.rerender(component(example, None));
+    assert_ansi_eq(
+        instance.last_frame(),
+        &lines(&["╭───────╮", "│Content│", "╰───────╯"]),
+    );
+}
+
+#[test]
 fn hide_top_border() {
     let output = render(
         View::new()
