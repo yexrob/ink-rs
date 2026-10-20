@@ -237,6 +237,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 - **`background.tsx` 中 Static 背景色的用例**：Ink 的测试经 `render()` 的 debug 模式取输出，只有 Static 时末尾带 `\n`。`render_to_string` 按 Ink `renderToString` 的规则去掉这个换行，移植版的期望值随之去掉末尾空行。
 - **`overflow.tsx` 的越界写入用例**：`columns: 10` 时，Ink 把右边框写到行宽之外，JS 稀疏数组留下的空洞在拼接时被跳过，内部行宽 11 格。移植版按网格补空格，内部行与边框行同宽，都是 12 格。
 - **`c1-rendering.tsx` 宽度 4 的超链接用例**：wrap-ansi 折行时用 BEL 结尾重开超链接，叠在原链接内，第二行出现两次打开、两次关闭。移植版每段只打开、关闭一次，保留原终结符。
+- **`flex-align-self.tsx` 的 `row - align self baseline`**：Yoga 在有子项按 baseline 对齐时按内容决定行高，`flex-end` 的子项随之贴在内容行的底部。taffy 按 CSS，单行容器的行高等于容器高度，移植版的期望值按 CSS 改写。
 
 ## Ink 期望中反直觉的行为
 

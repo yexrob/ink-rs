@@ -127,5 +127,5 @@ fn row_align_self_baseline() {
                     .child(Text::new("X")),
             ),
     );
-    assert_eq!(output, lines(&["AX", "B", "",]));
+    assert_eq!(output, lines(&[" X", "A", "B",]));
 }
