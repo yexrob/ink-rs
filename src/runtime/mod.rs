@@ -32,7 +32,7 @@ mod state;
 mod tests;
 
 pub use animation::{Animation, AnimationOptions};
-pub use app_handle::AppHandle;
+pub use app_handle::{AlreadySuspended, AppHandle};
 pub(crate) use app_handle::{ExitResult, UpdateQueue, Wake};
 pub use focus::{FocusManager, FocusOptions};
 pub use hooks::Scope;

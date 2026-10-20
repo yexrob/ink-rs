@@ -252,6 +252,18 @@ pub(super) struct Registration {
 }
 
 impl Registration {
+    // A callback holding the terminal has no loop: termination signals
+    // restore and terminate without waiting for cleanups.
+    pub(super) fn leave_loop(&mut self) {
+        let _entries = registry().entries.lock().unwrap();
+        self.entry.in_loop.store(false, Ordering::SeqCst);
+    }
+
+    pub(super) fn rejoin_loop(&mut self) {
+        let _entries = registry().entries.lock().unwrap();
+        self.entry.in_loop.store(true, Ordering::SeqCst);
+    }
+
     pub(super) fn enter_loop(&mut self) {
         let entries = registry().entries.lock().unwrap();
         // A nested wait suspends the caller's loop. Treat it as outside the

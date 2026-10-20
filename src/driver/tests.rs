@@ -44,9 +44,14 @@ fn run(ci: &str, tty: bool) -> String {
         Instant::now(),
     );
     let (sender, receiver) = mpsc::channel();
+    let mut registration = super::ProcessTerminal::new(sender.clone()).register(sender.clone());
+    registration.enter_loop();
     app.queue().set_wake(Arc::new(sender));
     app.render_if_due(Instant::now());
-    assert!(matches!(run_loop(&mut app, &receiver), Stop::Idle));
+    assert!(matches!(
+        run_loop(&mut app, &receiver, &mut registration),
+        Stop::Idle
+    ));
     app.unmount();
     terminal.writes().join("")
 }
@@ -85,6 +90,8 @@ fn run_loop_exits_while_an_outside_handle_is_retained() {
         Instant::now(),
     );
     let (sender, receiver) = mpsc::channel();
+    let mut registration = super::ProcessTerminal::new(sender.clone()).register(sender.clone());
+    registration.enter_loop();
     app.queue().set_wake(Arc::new(sender));
     app.render_if_due(Instant::now());
     let handle = app.queue().handle();
@@ -93,7 +100,10 @@ fn run_loop_exits_while_an_outside_handle_is_retained() {
         thread::sleep(Duration::from_millis(20));
         worker_handle.exit_with("finished");
     });
-    assert!(matches!(run_loop(&mut app, &receiver), Stop::Exit));
+    assert!(matches!(
+        run_loop(&mut app, &receiver, &mut registration),
+        Stop::Exit
+    ));
     let value = app.take_exit_result().unwrap().unwrap().unwrap();
     assert_eq!(*value.downcast::<&str>().unwrap(), "finished");
     worker.join().unwrap();
@@ -120,6 +130,8 @@ fn input_eof_allows_natural_end_after_updates() {
         Instant::now(),
     );
     let (sender, receiver) = mpsc::channel();
+    let mut registration = super::ProcessTerminal::new(sender.clone()).register(sender.clone());
+    registration.enter_loop();
     app.queue().set_wake(Arc::new(sender.clone()));
     app.render_if_due(Instant::now());
     let handle = app.queue().handle();
@@ -128,7 +140,10 @@ fn input_eof_allows_natural_end_after_updates() {
     handle.update(move || flag.store(true, std::sync::atomic::Ordering::SeqCst));
     drop(handle);
     sender.send(Message::InputEnded).unwrap();
-    assert!(matches!(run_loop(&mut app, &receiver), Stop::Idle));
+    assert!(matches!(
+        run_loop(&mut app, &receiver, &mut registration),
+        Stop::Idle
+    ));
     assert!(updated.load(std::sync::atomic::Ordering::SeqCst));
     assert!(app.raw_mode());
 }
@@ -156,6 +171,8 @@ fn adjacent_input_is_batched_without_crossing_other_messages() {
         Instant::now(),
     );
     let (sender, receiver) = mpsc::channel();
+    let mut registration = super::ProcessTerminal::new(sender.clone()).register(sender.clone());
+    registration.enter_loop();
     app.render_if_due(Instant::now());
     for message in [
         Message::Input(b"a".to_vec()),
@@ -166,6 +183,9 @@ fn adjacent_input_is_batched_without_crossing_other_messages() {
     ] {
         sender.send(message).unwrap();
     }
-    assert!(matches!(run_loop(&mut app, &receiver), Stop::Idle));
+    assert!(matches!(
+        run_loop(&mut app, &receiver, &mut registration),
+        Stop::Idle
+    ));
     assert_eq!(*received.borrow(), ["ab", "c"]);
 }

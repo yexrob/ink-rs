@@ -1,4 +1,4 @@
-//! Ported from ink test/kitty-negotiation.tsx @ 26d2c3f.
+//! Ported from Ink test/kitty-negotiation.tsx (Ink 8.0.0, commit 26d2c3f).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -71,4 +71,56 @@ fn pasted_query_responses_remain_input_and_do_not_enable_the_protocol() {
     app.advance(Duration::from_millis(30));
     assert_eq!(*inputs.borrow(), ["[?0u"]);
     assert!(!terminal.writes().iter().any(|write| write == "\x1b[>1u"));
+}
+
+#[test]
+fn suspension_cancels_pending_keyboard_negotiation() {
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(
+        component(
+            |cx: &mut Scope, _: &()| {
+                cx.use_input(true, |_, _| {});
+                Text::new("hello").into()
+            },
+            (),
+        ),
+        Options {
+            alternate_screen: true,
+            kitty_keyboard: KittyKeyboard::Auto(KittyFlags::default()),
+            ..Options::default()
+        },
+        &terminal,
+    );
+    app.suspend_terminal().unwrap();
+    let count = terminal.writes().len();
+    app.input("\x1b[?0u");
+    app.advance(Duration::from_millis(30));
+    assert_eq!(terminal.writes().len(), count);
+    app.resume_terminal();
+    assert!(!terminal.writes().concat().contains("\x1b[>1u"));
+}
+
+#[test]
+fn unmount_while_suspended_does_not_pop_the_primary_keyboard_stack() {
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(
+        component(
+            |cx: &mut Scope, _: &()| {
+                cx.use_input(true, |_, _| {});
+                Text::new("hello").into()
+            },
+            (),
+        ),
+        Options {
+            alternate_screen: true,
+            kitty_keyboard: KittyKeyboard::Enabled(KittyFlags::default()),
+            ..Options::default()
+        },
+        &terminal,
+    );
+    app.suspend_terminal().unwrap();
+    app.unmount();
+    let output = terminal.writes().concat();
+    assert_eq!(output.matches("\x1b[>1u").count(), 1);
+    assert_eq!(output.matches("\x1b[<u").count(), 1);
 }

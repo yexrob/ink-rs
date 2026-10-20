@@ -4,6 +4,18 @@ use std::sync::{Arc, Mutex};
 
 use crate::Error;
 
+/// A terminal handover is queued or active.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AlreadySuspended;
+
+impl std::fmt::Display for AlreadySuspended {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the terminal is already suspended")
+    }
+}
+
+impl std::error::Error for AlreadySuspended {}
+
 /// A thread-safe handle for submitting updates and requesting app exit.
 /// Retaining a handle keeps a live driver running until an exit request.
 /// Drop handles when their work ends so the app can reach its natural end.
@@ -15,6 +27,26 @@ pub struct AppHandle {
 }
 
 impl AppHandle {
+    /// At the end of the next step, hands the terminal to `f`: erases the
+    /// frame, shows the cursor, disables raw mode, bracketed paste and kitty
+    /// flags, and leaves the alternate screen.
+    ///
+    /// `f` runs while the app's loop waits. The sync driver calls it on the
+    /// thread that called `wait_until_exit`. After `f` returns, the app takes
+    /// the terminal back and redraws. Non-interactive apps hand over input
+    /// only and keep writing output.
+    ///
+    /// `f` should block until the child process exits. Report results through
+    /// `update` or `exit_with*`; a panic unwinds like a handler panic.
+    /// Returns an error when a handover is queued or active. After unmount
+    /// begins, drops `f` without calling it and returns `Ok(())`.
+    pub fn suspend_terminal(
+        &self,
+        f: impl FnOnce() + Send + 'static,
+    ) -> Result<(), AlreadySuspended> {
+        self.queue.request_suspension(Box::new(f))
+    }
+
     /// Requests exit with `Ok(None)` as the `wait_until_exit` result.
     pub fn exit(&self) {
         self.queue.request_exit(Ok(None));
@@ -72,6 +104,8 @@ pub(crate) type ExitResult = Result<Option<Box<dyn Any + Send>>, Error>;
 #[derive(Default)]
 struct QueueState {
     callbacks: VecDeque<Callback>,
+    suspension: Option<Callback>,
+    suspended: bool,
     exit: Option<ExitResult>,
     handles: usize,
     closed: bool,
@@ -84,6 +118,34 @@ pub(crate) struct UpdateQueue {
 }
 
 impl UpdateQueue {
+    pub(crate) fn request_suspension(&self, callback: Callback) -> Result<(), AlreadySuspended> {
+        let mut state = self.state.lock().unwrap();
+        let result = if state.closed {
+            Ok(())
+        } else if state.suspended || state.suspension.is_some() {
+            Err(AlreadySuspended)
+        } else {
+            state.suspension = Some(callback);
+            self.wake(&state);
+            return Ok(());
+        };
+        // Captured values can submit work from Drop.
+        drop(state);
+        drop(callback);
+        result
+    }
+
+    pub(crate) fn take_suspension(&self) -> Option<Callback> {
+        let mut state = self.state.lock().unwrap();
+        let callback = state.suspension.take()?;
+        state.suspended = true;
+        Some(callback)
+    }
+
+    pub(crate) fn resume(&self) {
+        self.state.lock().unwrap().suspended = false;
+    }
+
     pub(crate) fn request_failure(&self, error: Error) {
         let mut state = self.state.lock().unwrap();
         let previous = if !state.closed && !matches!(state.exit, Some(Err(_))) {
@@ -144,7 +206,7 @@ impl UpdateQueue {
 
     pub(crate) fn is_idle(&self) -> bool {
         let state = self.state.lock().unwrap();
-        state.handles == 0 && state.callbacks.is_empty()
+        state.handles == 0 && state.callbacks.is_empty() && state.suspension.is_none()
     }
 
     pub(crate) fn drain(&self) {
@@ -160,7 +222,10 @@ impl UpdateQueue {
             let mut state = self.state.lock().unwrap();
             state.closed = true;
             state.wake = None;
-            std::mem::take(&mut state.callbacks)
+            (
+                std::mem::take(&mut state.callbacks),
+                state.suspension.take(),
+            )
         };
         drop(callbacks);
     }

@@ -1,4 +1,5 @@
-//! Ink 8.0.0 test/exit.tsx, test/hooks.tsx and test/render.tsx, commit 26d2c3f.
+//! Ink 8.0.0 test/exit.tsx, test/hooks.tsx, test/render.tsx and
+//! test/suspend-terminal.tsx, commit 26d2c3f.
 //! One executable serves as harness and fixture so Cargo builds both together.
 use std::io::{self, Write};
 #[cfg(target_os = "macos")]
@@ -40,9 +41,15 @@ enum Case {
     Pipe,
     AnimationPipe,
     AnimationNonInteractive,
+    Suspend,
 }
 
 const CASES: &[(Case, &str, &str)] = &[
+    (
+        Case::Suspend,
+        "suspend",
+        "suspendTerminal hands the terminal to a child process, then redraws (PTY)",
+    ),
     (
         Case::Normal,
         "normal",
@@ -102,6 +109,25 @@ const CASES: &[(Case, &str, &str)] = &[
         "destructor panic restores before abort",
     ),
 ];
+
+fn suspended_child(cx: &mut Scope, _: &()) -> Element {
+    cx.use_input(true, |_, _| {});
+    let handle = cx.use_app();
+    cx.use_effect((), move || {
+        let exit = handle.clone();
+        handle
+            .suspend_terminal(move || {
+                print!("CHILD_OUTPUT");
+                io::stdout().flush().unwrap();
+                thread::spawn(move || {
+                    thread::sleep(Duration::from_millis(100));
+                    exit.exit();
+                });
+            })
+            .unwrap();
+    });
+    Text::new("Ink frame").into()
+}
 
 fn animation_exit(cx: &mut Scope, _: &()) -> Element {
     let animation = cx.use_animation(AnimationOptions {
@@ -262,6 +288,7 @@ fn fixture(case: Case) -> Result {
         Case::NestedPanic => component(nested_panic, false),
         Case::Pipe => Text::new("ready-stdin-not-tty").into(),
         Case::AnimationPipe | Case::AnimationNonInteractive => component(animation_exit, ()),
+        Case::Suspend => component(suspended_child, ()),
         _ => component(example, case),
     };
     let mut app = render(
@@ -329,6 +356,19 @@ fn fixture(case: Case) -> Result {
 
 fn assert_output(case: Case, output: &[u8]) -> Result {
     let output = String::from_utf8_lossy(output);
+    if case == Case::Suspend {
+        let Some((_, after)) = output.rsplit_once("CHILD_OUTPUT") else {
+            return Err(format!("missing child output: {output:?}").into());
+        };
+        let mut screen = vt100::Parser::new(24, 100, 0);
+        screen.process(after.as_bytes());
+        if !output.contains("\x1b[?25h")
+            || !after.contains("\x1b[?25l")
+            || !screen.screen().contents().contains("Ink frame")
+        {
+            return Err(format!("missing handover or redraw: {output:?}").into());
+        }
+    }
     let marker = match case {
         Case::Error | Case::RawError | Case::Thrown | Case::ThrownCoreFirst => "errored",
         Case::Value => "result:hello from ink",

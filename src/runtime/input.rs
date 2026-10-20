@@ -65,6 +65,12 @@ impl Drop for Registration {
 }
 
 impl Runtime {
+    pub(crate) fn pause_input(&mut self) {
+        let mut input = self.instance.store.input.borrow_mut();
+        input.parser.reset();
+        input.deadline = None;
+    }
+
     pub(crate) fn input_holders(&self) -> usize {
         self.instance.store.input.borrow().handlers.len()
     }

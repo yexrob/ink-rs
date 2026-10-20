@@ -71,7 +71,9 @@ struct AppOutput {
     interactive: bool,
     alternate: bool,
     paste_mode: bool,
-    kitty_protocol: bool,
+    kitty_flags: Option<KittyFlags>,
+    resume_kitty_flags: Option<KittyFlags>,
+    suspended: bool,
     static_rows: Vec<Vec<Cell>>,
     last_frame: Option<Frame>,
     last_cursor: Option<(usize, usize)>,
@@ -85,13 +87,16 @@ impl AppOutput {
         if self.paste_mode {
             bytes.extend_from_slice(b"\x1b[?2004l");
         }
-        if self.kitty_protocol {
+        if self.kitty_flags.is_some() {
             bytes.extend_from_slice(b"\x1b[<u");
         }
         bytes
     }
 
     fn restore_bytes(&self) -> Vec<u8> {
+        if self.suspended && self.interactive {
+            return Vec::new();
+        }
         let mut bytes = Vec::new();
         if self.alternate {
             bytes.extend_from_slice(b"\x1b[?1049l\x1b[?25h");
@@ -119,7 +124,7 @@ impl AppOutput {
     }
 
     fn enable_kitty(&mut self, flags: KittyFlags) {
-        self.kitty_protocol = true;
+        self.kitty_flags = Some(flags);
         self.terminal.write(
             format!("\x1b[>{}u", flags.bits()).as_bytes(),
             &self.restore_bytes(),
@@ -187,7 +192,7 @@ impl AppOutput {
     }
 
     fn clear(&mut self) {
-        if self.interactive {
+        if self.interactive && !self.suspended {
             let mut bytes = Vec::new();
             self.output.clear(&mut bytes);
             self.write(bytes);
@@ -195,6 +200,9 @@ impl AppOutput {
     }
 
     fn external_write(&mut self, stream: OutputStream, data: &str) {
+        if self.interactive && self.suspended {
+            return;
+        }
         if !self.interactive {
             let restore = self.restore_bytes();
             match stream {
@@ -249,6 +257,10 @@ impl AppOutput {
     }
 
     fn restore(&mut self, mut final_output: Vec<u8>) {
+        if self.interactive && self.suspended {
+            self.terminal.restore(&[]);
+            return;
+        }
         if self.alternate {
             final_output.extend_from_slice(b"\x1b[?1049l\x1b[?25h");
         } else {
@@ -262,7 +274,7 @@ impl AppOutput {
         final_output.splice(..0, self.restore_modes());
         self.terminal.restore(&final_output);
         self.paste_mode = false;
-        self.kitty_protocol = false;
+        self.kitty_flags = None;
     }
 }
 
@@ -272,7 +284,12 @@ impl WriteDestination for RefCell<AppOutput> {
     }
 }
 
+pub(crate) enum Reason {
+    Api,
+}
+
 pub(crate) struct App {
+    api_suspended: bool,
     raw_mode: bool,
     kitty_query: Option<(KittyFlags, Instant)>,
     runtime: Option<Runtime>,
@@ -287,6 +304,95 @@ pub(crate) struct App {
 }
 
 impl App {
+    pub(crate) fn is_suspended(&self) -> bool {
+        self.api_suspended
+    }
+
+    pub(crate) fn begin_suspension(&mut self) -> Option<Box<dyn FnOnce() + Send>> {
+        if self.runtime.is_none() || self.queue.has_exit() {
+            return None;
+        }
+        let callback = self.queue.take_suspension()?;
+        self.suspend(Reason::Api);
+        Some(callback)
+    }
+
+    pub(crate) fn suspend(&mut self, reason: Reason) {
+        let suspended = self.is_suspended();
+        match reason {
+            Reason::Api => self.api_suspended = true,
+        }
+        if suspended || self.runtime.is_none() {
+            return;
+        }
+        self.kitty_query = None;
+        self.runtime.as_mut().unwrap().pause_input();
+        let mut output = self.destination.borrow_mut();
+        let mut bytes = output.restore_modes();
+        if output.interactive {
+            if output.alternate {
+                bytes.extend_from_slice(b"\x1b[?1049l\x1b[?25h");
+            } else {
+                let mut screen = Vec::new();
+                output.output.clear(&mut screen);
+                output.output.done(&mut screen);
+                if output.tty {
+                    synchronize(&mut screen);
+                }
+                bytes.extend(screen);
+            }
+        }
+        output.terminal.write(&bytes, &[]);
+        output.paste_mode = false;
+        output.resume_kitty_flags = output.kitty_flags.take();
+        output.suspended = true;
+        if self.raw_mode {
+            output.terminal.set_raw_mode(false);
+            self.raw_mode = false;
+        }
+    }
+
+    pub(crate) fn resume(&mut self, reason: Reason) {
+        if self.runtime.is_none() || self.queue.has_exit() {
+            return;
+        }
+        let flag = match reason {
+            Reason::Api => &mut self.api_suspended,
+        };
+        if !std::mem::take(flag) {
+            return;
+        }
+        if matches!(reason, Reason::Api) {
+            self.queue.resume();
+        }
+        if self.is_suspended() {
+            return;
+        }
+        if self.interactive {
+            self.resize(self.terminal_size());
+        }
+        let mut output = self.destination.borrow_mut();
+        output.suspended = false;
+        let mut bytes = Vec::new();
+        if output.alternate {
+            bytes.extend_from_slice(b"\x1b[?1049h\x1b[H");
+        }
+        output.kitty_flags = output.resume_kitty_flags.take();
+        if let Some(flags) = output.kitty_flags {
+            bytes.extend_from_slice(format!("\x1b[>{}u", flags.bits()).as_bytes());
+        }
+        let restore = output.restore_bytes();
+        output.terminal.write(&bytes, &restore);
+        if self.interactive {
+            output.output = Output::new();
+            output.last_frame = None;
+            output.last_cursor = None;
+            self.resize_from = None;
+            self.pending = true;
+            self.deadline = None;
+        }
+    }
+
     pub(crate) fn raw_mode(&self) -> bool {
         self.raw_mode
     }
@@ -347,7 +453,9 @@ impl App {
             interactive,
             alternate,
             paste_mode: false,
-            kitty_protocol: false,
+            kitty_flags: None,
+            resume_kitty_flags: None,
+            suspended: false,
             static_rows: Vec::new(),
             last_frame: None,
             last_cursor: None,
@@ -370,6 +478,7 @@ impl App {
         }
         runtime.set_destination(destination.clone());
         Self {
+            api_suspended: false,
             raw_mode: false,
             kitty_query,
             queue: runtime.queue(),
@@ -394,7 +503,7 @@ impl App {
         };
         let size = WindowSize::resolve(size);
         let mut destination = self.destination.borrow_mut();
-        if self.interactive && self.resize_from.is_none() {
+        if self.interactive && !destination.suspended && self.resize_from.is_none() {
             self.resize_from = Some(WindowSize {
                 columns: destination.columns as u16,
                 rows: destination.rows as u16,
@@ -412,6 +521,7 @@ impl App {
     }
 
     pub(crate) fn render_if_due(&mut self, now: Instant) -> Option<Instant> {
+        let suspended = self.is_suspended();
         if self
             .kitty_query
             .is_some_and(|(_, deadline)| now >= deadline)
@@ -433,11 +543,13 @@ impl App {
         if commit.is_some() {
             self.pending = true;
         }
-        let immediate = self.resize_from.is_some()
-            || commit.as_ref().is_some_and(|commit| {
-                commit.static_items || (self.interactive && commit.static_changed)
-            });
+        let immediate = !(self.interactive && suspended)
+            && (self.resize_from.is_some()
+                || commit.as_ref().is_some_and(|commit| {
+                    commit.static_items || (self.interactive && commit.static_changed)
+                }));
         let due = self.interactive
+            && !suspended
             && self.pending
             && self.deadline.is_none_or(|deadline| now >= deadline);
         if immediate || due {
@@ -472,26 +584,28 @@ impl App {
         // Ink switches paste inside effects; end-of-step comparison avoids
         // mode writes for a use_paste swap in one commit. Disable paste before
         // raw mode, and enable it after raw mode succeeds (use-paste.ts).
-        if !paste_mode {
-            self.destination.borrow_mut().set_paste_mode(false);
+        if !suspended {
+            if !paste_mode {
+                self.destination.borrow_mut().set_paste_mode(false);
+            }
+            if raw_mode != self.raw_mode {
+                let mut destination = self.destination.borrow_mut();
+                // Ink defers disable to a microtask; the end of a step gives
+                // same-commit holder swaps the same terminal-mode lifetime.
+                destination.terminal.set_raw_mode(raw_mode);
+                self.raw_mode = raw_mode;
+            }
+            self.destination
+                .borrow_mut()
+                .set_paste_mode(self.raw_mode && paste_mode);
         }
-        if raw_mode != self.raw_mode {
-            let mut destination = self.destination.borrow_mut();
-            // Ink defers disable to a microtask; the end of a step gives
-            // same-commit holder swaps the same terminal-mode lifetime.
-            destination.terminal.set_raw_mode(raw_mode);
-            self.raw_mode = raw_mode;
-        }
-        self.destination
-            .borrow_mut()
-            .set_paste_mode(self.raw_mode && paste_mode);
         if self.queue.has_exit() {
             self.unmount();
             return None;
         }
         let wake = if runtime.has_work() || runtime.queue().has_pending() {
             Some(now)
-        } else if self.pending && self.interactive {
+        } else if self.pending && self.interactive && !suspended {
             Some(self.deadline.unwrap_or(now))
         } else {
             None
@@ -503,6 +617,9 @@ impl App {
     }
 
     pub(crate) fn input(&mut self, bytes: &[u8], now: Instant) {
+        if self.is_suspended() {
+            return;
+        }
         if self
             .kitty_query
             .is_some_and(|(_, deadline)| now >= deadline)
@@ -577,7 +694,7 @@ impl App {
             self.pending = true;
         }
         if self.interactive {
-            if self.pending {
+            if self.pending && !self.is_suspended() {
                 self.paint();
             }
         } else {
@@ -602,7 +719,9 @@ impl App {
         if committed {
             runtime.passive_effects();
         }
-        runtime.after_write();
+        if !(self.interactive && self.api_suspended) {
+            runtime.after_write();
+        }
         // Ink finishUnmount restores the terminal after React cleanups.
         drop(self.runtime.take());
         self.destination.borrow_mut().restore(final_output);

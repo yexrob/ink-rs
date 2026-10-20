@@ -3,7 +3,7 @@ use std::io;
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
-use crate::app::{App, resolve_interactive};
+use crate::app::{App, Reason, resolve_interactive};
 use crate::runtime::{UpdateQueue, Wake};
 use crate::terminal::Terminal;
 use crate::{AppHandle, Element, Error, Options};
@@ -111,7 +111,11 @@ impl Instance {
     /// Termination signals restore the terminal and retain their default effect.
     pub fn wait_until_exit(mut self) -> Result<Option<Box<dyn Any + Send>>, Error> {
         self.registration.as_mut().unwrap().enter_loop();
-        let result = run_loop(&mut self.app, &self.receiver);
+        let result = run_loop(
+            &mut self.app,
+            &self.receiver,
+            self.registration.as_mut().unwrap(),
+        );
         self.app.unmount();
         let error = self.app.take_error();
         self.registration.take();
@@ -149,7 +153,11 @@ fn natural_end(next: Option<Instant>, queue: &UpdateQueue, input_alive: bool) ->
     next.is_none() && queue.is_idle() && !input_alive
 }
 
-fn run_loop(app: &mut App, receiver: &mpsc::Receiver<Message>) -> Stop {
+fn run_loop(
+    app: &mut App,
+    receiver: &mpsc::Receiver<Message>,
+    registration: &mut Registration,
+) -> Stop {
     let queue = app.queue();
     let mut message = None;
     let mut input_ended = false;
@@ -187,6 +195,13 @@ fn run_loop(app: &mut App, receiver: &mpsc::Receiver<Message>) -> Stop {
         }
         if app.exit_result().is_some() {
             return Stop::Exit;
+        }
+        if let Some(callback) = app.begin_suspension() {
+            registration.leave_loop();
+            callback();
+            registration.rejoin_loop();
+            app.resume(Reason::Api);
+            continue;
         }
         if natural_end(next, &queue, app.raw_mode() && !input_ended) {
             // An acquire during this step can restart stdin after EOF. Observe

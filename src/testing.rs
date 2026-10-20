@@ -5,7 +5,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use crate::app::{App, resolve_interactive};
+use crate::app::{App, Reason, resolve_interactive};
 use crate::paint::{Frame, serialize_row};
 use crate::runtime::{Runtime, WriteDestination};
 use crate::terminal::Terminal;
@@ -323,6 +323,20 @@ pub struct TestApp {
 }
 
 impl TestApp {
+    /// Hands over the terminal until [`Self::resume_terminal`].
+    /// Rejects a queued or active API suspension.
+    pub fn suspend_terminal(&mut self) -> Result<(), crate::AlreadySuspended> {
+        self.app.queue().request_suspension(Box::new(|| {}))?;
+        drop(self.app.begin_suspension());
+        Ok(())
+    }
+
+    /// Reclaims the terminal and runs a step.
+    pub fn resume_terminal(&mut self) {
+        self.app.resume(Reason::Api);
+        self.step();
+    }
+
     /// Feeds one stdin read at the current clock time, then runs a step.
     /// Input reaches active [`crate::Scope::use_input`], [`crate::Scope::use_paste`]
     /// or [`crate::Scope::use_focus`] hooks. A lone Esc or an incomplete
@@ -360,7 +374,14 @@ impl TestApp {
         if self.terminal.resized.replace(false) {
             self.app.resize(self.terminal.size());
         }
-        let due = self.app.render_if_due(self.now);
+        let due = loop {
+            let due = self.app.render_if_due(self.now);
+            let Some(callback) = self.app.begin_suspension() else {
+                break due;
+            };
+            callback();
+            self.app.resume(Reason::Api);
+        };
         // Effects can enqueue an event while a commit is running. Like an
         // event-source poll, deliver it on the next step, not inside Runtime.
         if self.terminal.resized.get() {
