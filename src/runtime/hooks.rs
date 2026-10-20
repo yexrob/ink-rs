@@ -361,6 +361,38 @@ impl Scope<'_> {
         self.effect(Kind::Effect(TypeId::of::<D>()), deps, f);
     }
 
+    /// Spawns `f()` with `tokio::task::spawn_local` after the commit, like
+    /// [`Self::use_effect`]. Changing dependencies or unmounting aborts the task.
+    ///
+    /// A running task keeps the app alive: `wait_until_exit` cannot reach its
+    /// natural end while it runs. A bare `spawn_local` holds nothing; capture
+    /// [`Self::use_app`] in it to obtain the same liveness.
+    /// A task panic is a component panic: the app displays the error overview
+    /// and `wait_until_exit` returns [`crate::Error::Panic`].
+    ///
+    /// Panics outside a `tokio::task::LocalSet` or local runtime. Tasks need a
+    /// driver that yields to the runtime: `ink_rs::tokio`, or
+    /// [`crate::testing::mount`] inside a `LocalSet`.
+    #[cfg(feature = "tokio")]
+    pub fn use_future<D: PartialEq + 'static, F: std::future::Future<Output = ()> + 'static>(
+        &mut self,
+        deps: D,
+        f: impl FnOnce() -> F + 'static,
+    ) {
+        let store = Rc::downgrade(self.store);
+        let queue = self.store.queue.clone();
+        self.use_effect(deps, move || {
+            let alive = queue.handle();
+            super::future::AbortOnDrop(::tokio::task::spawn_local(super::future::Guarded::new(
+                store,
+                async move {
+                    let _alive = alive;
+                    f().await;
+                },
+            )))
+        });
+    }
+
     /// Runs after layout and before paint. State updates repeat layout.
     /// The returned value is the cleanup, as with [`Scope::use_effect`].
     pub fn use_layout_effect<D: PartialEq + 'static, C: 'static>(

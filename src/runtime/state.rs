@@ -178,6 +178,9 @@ struct StateValue {
 }
 
 pub(super) struct Store {
+    // Tasks poll outside Runtime's guards; share its first-panic slot without
+    // retaining the runtime through a task's lifetime.
+    pub(super) panic: RefCell<Option<crate::PanicError>>,
     pub(super) focus: RefCell<super::focus::FocusState>,
     pub(super) box_readers: RefCell<Vec<Weak<BoxReader>>>,
     pub(super) input: RefCell<super::input::InputState>,
@@ -212,6 +215,7 @@ impl Drop for StateSlot {
 impl Store {
     pub(super) fn new() -> Rc<Self> {
         let store = Rc::new(Self {
+            panic: RefCell::new(None),
             focus: RefCell::default(),
             box_readers: RefCell::default(),
             input: RefCell::default(),

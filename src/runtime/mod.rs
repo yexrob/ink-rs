@@ -22,6 +22,8 @@ use state::{NodeLayout, RenderGuard, Store};
 mod animation;
 mod app_handle;
 mod focus;
+#[cfg(feature = "tokio")]
+mod future;
 mod hooks;
 mod input;
 mod output;
@@ -377,7 +379,6 @@ pub(crate) struct Runtime {
     pub(crate) suspend_on_ctrl_z: bool,
     stop_requested: bool,
     pub(crate) catch: bool,
-    panic: Option<PanicError>,
     overview: bool,
 }
 
@@ -422,7 +423,6 @@ impl Runtime {
             suspend_on_ctrl_z: true,
             stop_requested: false,
             catch: false,
-            panic: None,
             overview: false,
         }
     }
@@ -487,7 +487,7 @@ impl Runtime {
     }
 
     pub(crate) fn take_panic(&mut self) -> Option<PanicError> {
-        let panic = self.panic.take();
+        let panic = self.instance.store.panic.borrow_mut().take();
         self.overview |= panic.is_some();
         panic
     }
@@ -501,8 +501,9 @@ impl Runtime {
                 if self.overview && rethrow {
                     std::panic::resume_unwind(error.into_payload());
                 }
-                if self.panic.is_none() && !self.overview {
-                    self.panic = Some(error);
+                let mut panic = self.instance.store.panic.borrow_mut();
+                if panic.is_none() && !self.overview {
+                    *panic = Some(error);
                 }
                 false
             }
@@ -657,7 +658,7 @@ impl Runtime {
             drain(&mut runtime.cleanups.passive);
             drain(&mut runtime.cleanups.states);
             // A failed render must not mount effects in its abandoned tree.
-            if runtime.panic.is_none() {
+            if runtime.instance.store.panic.borrow().is_none() {
                 runtime.instance.effects(false);
             }
         });

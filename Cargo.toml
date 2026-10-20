@@ -4,7 +4,12 @@ version = "0.1.0"
 edition = "2024"
 description = "Build terminal user interfaces with components, in the spirit of Ink"
 
+[features]
+default = ["tokio"]
+tokio = ["dep:tokio"]
+
 [dependencies]
+tokio = { version = "1.54", optional = true, default-features = false, features = ["rt", "sync", "time"] }
 rustix = { version = "1", features = ["termios", "process"] }
 filedescriptor = "0.8"
 signal-hook = { version = "0.3", default-features = false, features = ["iterator"] }
@@ -13,6 +18,7 @@ unicode-segmentation = "1.13"
 unicode-width = "0.2"
 
 [dev-dependencies]
+tokio = { version = "1.54", features = ["rt", "sync", "time", "macros", "test-util"] }
 portable-pty = "0.9"
 vt100 = "0.16"
 
