@@ -73,11 +73,20 @@ fn squash(children: &[Inline]) -> StyledText {
             Inline::Span {
                 children,
                 transform,
-            } => squash(children)
-                .iter()
-                .enumerate()
-                .flat_map(|(index, line)| transform.apply(line, index))
-                .collect(),
+            } => {
+                let mut lines = squash(children);
+                match transform {
+                    LineTransform::Style(style) => {
+                        styled::style_span(&mut lines, style);
+                        lines
+                    }
+                    LineTransform::Function(_) => lines
+                        .iter()
+                        .enumerate()
+                        .flat_map(|(index, line)| transform.apply(line, index))
+                        .collect(),
+                }
+            }
         };
         styled::append(&mut result, lines);
     }

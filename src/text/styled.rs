@@ -4,7 +4,7 @@ use crate::Color;
 
 use super::ansi::{ControlStringKind, Token, tokenize};
 use super::sanitize::sanitize_ansi;
-use super::width::grapheme_width;
+use super::width::{grapheme_width, is_mark};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Hyperlink {
@@ -175,6 +175,20 @@ pub(crate) struct StyledChar {
 pub(crate) type StyledLine = Vec<StyledChar>;
 pub(crate) type StyledText = Vec<StyledLine>;
 
+/// Ink src/sanitize-ansi.ts defers a span's SGR past leading marks on each
+/// line. They inherit the preceding grapheme's style in append(), or the
+/// enclosing style when no grapheme precedes them.
+pub(crate) fn style_span(lines: &mut StyledText, style: &CharStyle) {
+    for line in lines {
+        for cell in line
+            .iter_mut()
+            .skip_while(|cell| cell.grapheme.chars().all(is_mark))
+        {
+            cell.style.fill_from(style);
+        }
+    }
+}
+
 /// Concatenation joins the boundary lines; explicit line breaks remain intact.
 pub(crate) fn append(target: &mut StyledText, source: StyledText) {
     let mut lines = source.into_iter();
@@ -196,7 +210,8 @@ fn append_cell(line: &mut StyledLine, cell: StyledChar) {
         return;
     };
     // Inline boundaries are not grapheme boundaries: a mark, ZWJ sequence, or
-    // flag can continue the preceding span. Its first scalar owns the style.
+    // flag can continue the preceding span. Its first scalar owns the style,
+    // completing style_span's deferred styling (Ink src/sanitize-ansi.ts).
     let boundary = previous.grapheme.len();
     let joined = format!("{}{}", previous.grapheme, cell.grapheme);
     let mut graphemes = joined.grapheme_indices(true);
