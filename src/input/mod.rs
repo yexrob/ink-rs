@@ -2,6 +2,7 @@
 //! and Runtime owns dispatch and escape-flush deadlines.
 
 pub(crate) mod keypress;
+pub(crate) mod kitty;
 pub(crate) mod parser;
 
 use keypress::{ParsedKey, is_non_alphanumeric_key};

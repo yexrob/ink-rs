@@ -49,6 +49,7 @@ pub fn render(element: impl Into<Element>, options: Options) -> Instance {
         Box::new(terminal),
         interactive,
         color,
+        Instant::now(),
     );
     app.queue().set_wake(Arc::new(sender));
     app.render_if_due(Instant::now());

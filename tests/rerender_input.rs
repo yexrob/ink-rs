@@ -54,3 +54,31 @@ fn rerender_keeps_an_escape_sequence_that_spans_two_reads() {
     app.input("A");
     assert_eq!(*keys.borrow(), [("".to_owned(), true, false)]);
 }
+
+type Events = Rc<RefCell<Vec<String>>>;
+
+#[test]
+fn rerender_keeps_a_bracketed_paste_that_spans_two_reads() {
+    let inputs = Events::default();
+    let pastes = Events::default();
+    let example = |cx: &mut Scope, (label, inputs, pastes): &(&str, Events, Events)| {
+        let inputs = inputs.clone();
+        cx.use_input(true, move |input, _| {
+            inputs.borrow_mut().push(input.to_owned())
+        });
+        let pastes = pastes.clone();
+        cx.use_paste(true, move |text| pastes.borrow_mut().push(text.to_owned()));
+        Text::new(*label).into()
+    };
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(
+        component(example, ("a", inputs.clone(), pastes.clone())),
+        Options::default(),
+        &terminal,
+    );
+    app.input("\x1b[200~part1");
+    app.rerender(component(example, ("b", inputs.clone(), pastes.clone())));
+    app.input("part2\x1b[201~");
+    assert_eq!(*pastes.borrow(), ["part1part2"]);
+    assert!(inputs.borrow().is_empty());
+}

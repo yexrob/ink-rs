@@ -65,15 +65,15 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `hooks-use-input-kitty.tsx` | 24 | M3 | 24 | `tests/hooks_use_input_kitty.rs` |
 | `hooks-use-input-navigation.tsx` | 18 | M3 | 18 | `tests/hooks_use_input_navigation.rs` |
 | `hooks-use-input.tsx` | 34 | M3 | 32 | `tests/hooks_use_input.rs` |
-| `hooks-use-paste.tsx` | 4 | M3 |  |  |
+| `hooks-use-paste.tsx` | 4 | M3 | 4 | `tests/hooks_use_paste.rs` |
 | `hooks.tsx` | 6 | M2 / M3 | 4 | `tests/hooks.rs` |
-| `input-buffered-ctrl-c.tsx` | 5 | M3 | 3 | `tests/input_buffered_ctrl_c.rs` |
+| `input-buffered-ctrl-c.tsx` | 5 | M3 | 5 | `tests/input_buffered_ctrl_c.rs` |
 | `input-keypad-enter.tsx` | 2 | M3 | 2 | `tests/input_keypad_enter.rs` |
 | `input-parser.ts` | 65 | M3 | 65 | `src/input/parser/tests.rs` |
 | `is-devtools-reachable.tsx` | 3 | — |  |  |
 | `issue-973-static-commit.tsx` | 1 | M2 | 1 | `tests/issue_973_static_commit.rs` |
-| `kitty-keyboard.tsx` | 77 | M3 | 63 | `src/input/keypress/tests/kitty_keyboard.rs` |
-| `kitty-negotiation.tsx` | 5 | M3 |  |  |
+| `kitty-keyboard.tsx` | 77 | M3 | 74 | `src/input/keypress/tests/kitty_keyboard.rs`、`tests/kitty_keyboard.rs` |
+| `kitty-negotiation.tsx` | 5 | M3 / M4 | 3 | `tests/kitty_negotiation.rs` |
 | `line-update.ts` | 29 | — | 0 | 不适用，cell diff 没有对应内部函数 |
 | `log-update-blank-growth.ts` | 4 | M2 | 4 | `src/output/tests/log_update_blank_growth.rs` |
 | `log-update-columns.tsx` | 8 | M2 | 3 | `src/output/tests/log_update_columns.rs` |
@@ -92,7 +92,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `render-to-string.tsx` | 37 | M0 / M1 | 32 | `tests/render_to_string.rs` |
 | `render.tsx` | 119 | M2 / M3 | 32 | `tests/render.rs` |
 | `rendering-regressions.tsx` | 2 | M0 | 2 | `tests/rendering_regressions.rs` |
-| `rerender-input.tsx` | 4 | M3 | 2 | `tests/rerender_input.rs` |
+| `rerender-input.tsx` | 4 | M3 | 3 | `tests/rerender_input.rs` |
 | `sanitize-ansi.ts` | 50 | M0 | 50 | `src/text/sanitize/tests.rs` |
 | `screen-reader.tsx` | 33 | M5 |  |  |
 | `squash-text-nodes.tsx` | 2 | M0 | 2 | `tests/squash_text_nodes.rs` |
@@ -332,14 +332,12 @@ Ink 有 95 个测试文件、1,646 个测试。
 - `kitty-keyboard.tsx`：
   - 重复：`kitty protocol - Ctrl letters retain their unshifted key code` 与 `kitty protocol - ctrl modifier` 输入相同，断言是后者的子集。
   - 不适用：`kitty protocol - preserves sequence and raw`。ink-rs 的 `ParsedKey` 不保留 `raw`，`sequence` 不经 `use_input` 交给用户。
-  - 待移植：`writes enable sequence on init when mode is enabled` 至 `auto detection does not treat invalid query-like sequence as a response` 的 12 个 app 级测试，随输入接入 App 移植。
+  - 不适用：`kitty protocol - auto detection handles Uint8Array query response`。ink-rs 的输入总是字节切片，没有字符串与 `Uint8Array` 两条路径。
+- `kitty-negotiation.tsx`：M4，挂起：`suspension cancels pending keyboard negotiation`、`unmount while suspended does not pop the primary keyboard stack`。
 - `hooks-use-input.tsx`：
   - 不适用，React transition 与 discrete 优先级：`useInput - discrete priority keeps states in sync with useTransition during rapid input`。
   - 重复：`useInput - handle remove (delete)` 与 `useInput - handle delete` 输入相同，fixture 条件相同。
-- `input-buffered-ctrl-c.tsx`：待移植，注册 `usePaste`，随粘贴移植：`buffered Ctrl+C respects exitOnCtrlC: false`、`buffered Ctrl+C respects bracketed paste`。
-- `rerender-input.tsx`：
-  - 待移植，注册 `usePaste`，随粘贴移植：`rerender() keeps a bracketed paste that spans two reads`。
-  - 不适用，Node stdin 的 `readable` 监听器：`rerender() does not detach and reattach the stdin readable listener`。
+- `rerender-input.tsx`：不适用，Node stdin 的 `readable` 监听器：`rerender() does not detach and reattach the stdin readable listener`。
 
 ## 缺 API
 
@@ -354,7 +352,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 - **app 高度上限。** `render.tsx` 的 `growing into an overflowing frame keeps <Static> rows that are still in the viewport - standard` 保留 History、S1–S3 和 `live 2 tick 1` 至 `live 4 tick 1`；顶部被裁掉的 `live 0`、`live 1` 不进入 scrollback。`alternate screen replays <Static> items added while the frame overflows once - standard` 的溢出阶段不输出被裁掉的 Static 行，检查可见屏幕无 Static；收缩后保留原期望 `S1, S2, S3, live 0 tick 3, 空行`。`cursor.tsx` 的 `standard rendering - fullscreen: cursor lands on the requested row on the sync path` 在 5 行终端中裁掉 6 行帧的 `Line 0`，可见 `Line 1!` 至 `Line 5`，声明 `(x=3,y=2)` 落到视口 `(row=1,column=3)`；不清屏，裁掉的行不进 scrollback，代替 Ink 的清屏与 cursorUp 字节断言。这些行为由 design.md 的屏高上限决定。
 - **cursor 与 hooks 的观测边界。** `cursor.tsx` 的 memo、stdout/stderr 写入和满屏更新测试把 hide/show 顺序与 cursorUp + cursorTo 字节改为 vt100 的光标行、列、可见性；memo 的卸载分支保留 hide 存在且 show 不存在的字节断言。`cursor-exit-position.tsx` 的 `done returns the cursor once without erasing output` 改为屏幕内容、光标在帧下方和第二次 done 无字节；备用屏退出检查主屏、光标、可见性，并保留退出序列之后只有 show 的字节断言。`hooks.tsx` 在进程内重建 fixture，将两个流按写入顺序喂给同一个 vt100 屏幕，卸载后添加 `exited`；stdout 的 stripAnsi/换行切分改为屏幕行比较。debug 用例保留数据和重放内容的期望。`render.tsx` 的同步序列用例检查初帧包装，重渲染后无新 write。
 - **app 的观测边界。** 按移植范围，整屏清除次数、按清屏序列切帧的部分改为 vt100 屏幕观测；零整屏清除断言检查 `CSI 2J`、`CSI 3J` 和 `CSI 1;1H` 后的向下擦除均未出现。`render all frames when interactive is explicitly true` 按每帧屏幕验证 Count 0–2，cell diff 不重写 Count 前缀。`side-by-side public components do not rewrite the unchanged left region` 检查左侧区域未重写及屏幕中的计数；不是锁定 Ink 的 CHA + EL。`no throttled renders after unmount` 的卸载消耗 TestApp，没有卸载后的 tick。以上不改变 Ink 的内容期望。
-- **输入的观测边界。** `hooks-use-input*.tsx` 与 `exit-keyboard.tsx` 不跑 PTY fixture，在进程内用 `testing::mount` 重建 fixture：条件匹配时请求退出，不匹配时 panic，`exit_result()` 为 `Some(Ok(None))` 代替 `exited` 与退出码。单独的 Esc 和不完整序列用 `advance(20ms)` 交出；连续方向键在一次读取中送入。`hooks.tsx` 的 `useInput - ignore input if not active` 没有定时器，用保留的 `AppHandle` 代替 fixture 的 100ms 退出，检查屏幕首行为 `x`。`components.tsx` 的 raw mode 用例用 `TestTerminal::raw_mode_calls()` 的完整序列代替 `setRawMode` 的 spy，去掉 ref/unref 与监听器数量断言；关闭在步骤结束时发生，代替 Ink 的微任务。`setRawMode() should throw if raw mode is not supported` 改为应用以 `ErrorKind::Unsupported` 退出，且没有切换调用。`cursor.tsx` 的输入用例检查 vt100 光标位置与可见性；空格用例保留 write 次数增长，滚动用例保留擦除期间的隐藏光标字节。`input-keypad-enter.tsx` 把两个投影数组断言合成 `(input, enter)` 对的比较。`rerender-input.tsx` 用测试时钟代替 FakeTimers。
+- **输入的观测边界。** `hooks-use-input*.tsx` 与 `exit-keyboard.tsx` 不跑 PTY fixture，在进程内用 `testing::mount` 重建 fixture：条件匹配时请求退出，不匹配时 panic，`exit_result()` 为 `Some(Ok(None))` 代替 `exited` 与退出码。单独的 Esc 和不完整序列用 `advance(20ms)` 交出；连续方向键在一次读取中送入。`hooks.tsx` 的 `useInput - ignore input if not active` 没有定时器，用保留的 `AppHandle` 代替 fixture 的 100ms 退出，检查屏幕首行为 `x`。`components.tsx` 的 raw mode 用例用 `TestTerminal::raw_mode_calls()` 的完整序列代替 `setRawMode` 的 spy，去掉 ref/unref 与监听器数量断言；关闭在步骤结束时发生，代替 Ink 的微任务。`setRawMode() should throw if raw mode is not supported` 改为应用以 `ErrorKind::Unsupported` 退出，且没有切换调用。`cursor.tsx` 的输入用例检查 vt100 光标位置与可见性；空格用例保留 write 次数增长，滚动用例保留擦除期间的隐藏光标字节。`input-keypad-enter.tsx` 把两个投影数组断言合成 `(input, enter)` 对的比较。`rerender-input.tsx` 用测试时钟代替 FakeTimers。`hooks-use-paste.tsx` 同样重建 fixture。`kitty-negotiation.tsx` 不公开 `resolveFlags`，flags 断言改为检查写出的 `CSI >24u`、`CSI >25u`。`kitty-keyboard.tsx` 的假流改为 `TestTerminal` 的 TTY 设置；同步回复用例在挂载后送入回复，此时 raw mode 已开启；卸载后的迟到回复用例经保留的 `AppHandle` 退出，再送入回复。
 - **退出的观测边界。** `render.tsx` 的 `waitUntilExit resolves first exit value when duplicate exits happen during teardown` 没有 Node 写回调屏障，改为 effect cleanup 在卸载中请求第二次退出，测试保留的 handle 在退出后再请求一次，结果仍为第一次的值。`exit.tsx` 的 `exit on exit() with error and static output` 不跑 PTY fixture，在进程内用 `testing::mount` 读取退出结果，输出期望不变。`components.tsx` 的两个备用屏退出用例只检查错误消息，Rust 错误没有 JS 调用栈。
 - **log-update 的测试检查屏幕。** 移植版把输出的字节交给 vt100，检查屏幕、scrollback、光标的位置和可见性，以及没有写出字节。Ink 锁定字节的断言（`eraseLines` 的行数、`ESC E` 等）改为检查这些字节产生的屏幕。vt100 在待换行状态下执行 EL 不擦最后一格，xterm 会擦，所以 `full-width updates do not erase after the last character` 还检查字节：满宽的行之后没有 EL。
 - **视口高度代替末尾换行。** Ink 的 log-update 测试为每帧选择是否带末尾换行，ink-rs 由视口高度决定：帧高达到屏高时不带。移植版为每个测试选视口高度，让被断言的帧停在 Ink 的位置。`incremental rendering - no trailing newline: shrink` 从满屏缩短，两帧无法同时对上：缩短后光标按 design.md 停在帧的下一行，Ink 的测试停在帧的最后一行。Ink 的公开 render 退出满屏后，光标也停在帧的下一行。

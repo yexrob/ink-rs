@@ -39,6 +39,7 @@ fn run(ci: &str, tty: bool) -> String {
         Box::new(terminal.clone()),
         resolve_interactive(options.interactive, in_ci, tty),
         ColorLevel::None,
+        Instant::now(),
     );
     let (sender, receiver) = mpsc::channel();
     app.queue().set_wake(Arc::new(sender));
@@ -79,6 +80,7 @@ fn run_loop_exits_while_an_outside_handle_is_retained() {
         Box::new(terminal),
         true,
         ColorLevel::None,
+        Instant::now(),
     );
     let (sender, receiver) = mpsc::channel();
     app.queue().set_wake(Arc::new(sender));

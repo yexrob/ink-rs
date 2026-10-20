@@ -274,6 +274,7 @@ impl Terminal for TestTerminal {
 /// Basic, matching Ink's test helpers rather than the process environment.
 pub fn mount(element: impl Into<Element>, options: Options, terminal: &TestTerminal) -> TestApp {
     let interactive = resolve_interactive(options.interactive, false, terminal.is_tty());
+    let now = Instant::now();
     let mut app = TestApp {
         app: App::new(
             element.into(),
@@ -281,8 +282,9 @@ pub fn mount(element: impl Into<Element>, options: Options, terminal: &TestTermi
             Box::new(terminal.clone()),
             interactive,
             options.color_level.unwrap_or(ColorLevel::Basic),
+            now,
         ),
-        now: Instant::now(),
+        now,
         terminal: terminal.clone(),
     };
     app.step();
@@ -298,8 +300,9 @@ pub struct TestApp {
 
 impl TestApp {
     /// Feeds one stdin read at the current clock time, then runs a step.
-    /// Input reaches active [`crate::Scope::use_input`] hooks. A lone Esc or an
-    /// incomplete sequence waits 20 ms; call [`Self::advance`] to flush it.
+    /// Input reaches active [`crate::Scope::use_input`] or [`crate::Scope::use_paste`]
+    /// hooks. A lone Esc or an incomplete sequence waits 20 ms; call
+    /// [`Self::advance`] to flush it.
     pub fn input(&mut self, bytes: impl AsRef<[u8]>) {
         self.app.input(bytes.as_ref(), self.now);
         self.step();

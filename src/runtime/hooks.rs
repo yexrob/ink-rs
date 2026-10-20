@@ -2,7 +2,7 @@ use std::any::{Any, TypeId};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use super::input::{Handler, Registration};
+use super::input::{Handler, InputHandler, PasteHandler, Registration};
 use super::output::{CursorCleanup, CursorPosition, OutputStream, OutputWriter};
 use super::state::{ElementMetrics, NodeRef, State, StateSlot, Store};
 use super::{AppHandle, Dirty, WindowSize};
@@ -64,14 +64,34 @@ impl Scope<'_> {
     /// exit without reaching the handler; releases reach it.
     pub fn use_input(&mut self, active: bool, handler: impl FnMut(&str, KeyEvent) + 'static) {
         let mut handler = Some(Box::new(handler) as Box<dyn FnMut(&str, KeyEvent)>);
-        let current: Handler = self.use_memo((), || Rc::new(RefCell::new(handler.take().unwrap())));
+        let current: InputHandler =
+            self.use_memo((), || Rc::new(RefCell::new(handler.take().unwrap())));
         // useEffectEvent in Ink keeps the subscription stable across renders.
         if let Some(handler) = handler {
             *current.borrow_mut() = handler;
         }
         let store = self.store.clone();
         self.use_effect(active, move || {
-            active.then(|| Registration::new(store, current))
+            active.then(|| Registration::new(store, Handler::Input(current)))
+        });
+    }
+
+    /// Handles pasted text while `active`, enabling raw mode and bracketed paste
+    /// mode through a passive effect. Each paste arrives in one call, verbatim.
+    /// While any paste hook is active, pastes do not reach [`Self::use_input`];
+    /// without one, `use_input` receives the paste as one input.
+    /// Calls use the handler from the latest render, in registration order.
+    pub fn use_paste(&mut self, active: bool, handler: impl FnMut(&str) + 'static) {
+        let mut handler = Some(Box::new(handler) as Box<dyn FnMut(&str)>);
+        let current: PasteHandler =
+            self.use_memo((), || Rc::new(RefCell::new(handler.take().unwrap())));
+        // Ink use-paste.ts uses useEffectEvent to retain the latest handler.
+        if let Some(handler) = handler {
+            *current.borrow_mut() = handler;
+        }
+        let store = self.store.clone();
+        self.use_effect(active, move || {
+            active.then(|| Registration::new(store, Handler::Paste(current)))
         });
     }
 

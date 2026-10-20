@@ -8,7 +8,10 @@ use crate::output::Output;
 use crate::paint::{Cell, Frame, serialize_row};
 use crate::runtime::{ExitResult, Runtime, UpdateQueue, WriteDestination};
 use crate::terminal::Terminal;
-use crate::{ColorLevel, CursorPosition, Element, OutputStream, RenderOptions, WindowSize};
+use crate::{
+    ColorLevel, CursorPosition, Element, KittyFlags, KittyKeyboard, OutputStream, RenderOptions,
+    WindowSize,
+};
 
 /// Options for a live app, including [`crate::testing::mount`].
 #[derive(Clone, Copy, Debug)]
@@ -16,6 +19,8 @@ pub struct Options {
     /// Exit with `Ok(None)` on a Ctrl+C press or repeat (default true).
     /// Those events do not reach `use_input`; a release does.
     pub exit_on_ctrl_c: bool,
+    /// Opt-in kitty keyboard negotiation. Defaults to [`KittyKeyboard::Disabled`].
+    pub kitty_keyboard: KittyKeyboard,
     /// Paint rate limit, default 30. The window is ceil(1000 / max_fps)
     /// milliseconds; zero uses a zero-millisecond window, matching Ink.
     pub max_fps: u32,
@@ -31,6 +36,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             exit_on_ctrl_c: true,
+            kitty_keyboard: KittyKeyboard::Disabled,
             max_fps: 30,
             interactive: None,
             alternate_screen: false,
@@ -61,24 +67,60 @@ struct AppOutput {
     tty: bool,
     interactive: bool,
     alternate: bool,
+    paste_mode: bool,
+    kitty_protocol: bool,
     static_rows: Vec<Vec<Cell>>,
     last_frame: Option<Frame>,
     last_cursor: Option<(usize, usize)>,
 }
 
 impl AppOutput {
-    fn restore_bytes(&self) -> Vec<u8> {
-        if self.alternate {
-            return b"\x1b[?1049l\x1b[?25h".to_vec();
-        }
+    fn restore_modes(&self) -> Vec<u8> {
+        // Ink App's unmount effect disables paste before finishUnmount pops
+        // kitty flags, ahead of screen restoration or the non-interactive frame.
         let mut bytes = Vec::new();
-        if self.interactive {
+        if self.paste_mode {
+            bytes.extend_from_slice(b"\x1b[?2004l");
+        }
+        if self.kitty_protocol {
+            bytes.extend_from_slice(b"\x1b[<u");
+        }
+        bytes
+    }
+
+    fn restore_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        if self.alternate {
+            bytes.extend_from_slice(b"\x1b[?1049l\x1b[?25h");
+        } else if self.interactive {
             self.output.restore_bytes(&mut bytes);
             if self.tty {
                 synchronize(&mut bytes);
             }
         }
+        bytes.splice(..0, self.restore_modes());
         bytes
+    }
+
+    fn set_paste_mode(&mut self, enabled: bool) {
+        let enabled = enabled && self.tty;
+        if self.paste_mode != enabled {
+            self.paste_mode = enabled;
+            let bytes = if enabled {
+                b"\x1b[?2004h"
+            } else {
+                b"\x1b[?2004l"
+            };
+            self.terminal.write(bytes, &self.restore_bytes());
+        }
+    }
+
+    fn enable_kitty(&mut self, flags: KittyFlags) {
+        self.kitty_protocol = true;
+        self.terminal.write(
+            format!("\x1b[>{}u", flags.bits()).as_bytes(),
+            &self.restore_bytes(),
+        );
     }
 
     fn paint(
@@ -151,9 +193,10 @@ impl AppOutput {
 
     fn external_write(&mut self, stream: OutputStream, data: &str) {
         if !self.interactive {
+            let restore = self.restore_bytes();
             match stream {
-                OutputStream::Stdout => self.terminal.write(data.as_bytes(), &[]),
-                OutputStream::Stderr => self.terminal.write_stderr(data.as_bytes(), &[]),
+                OutputStream::Stdout => self.terminal.write(data.as_bytes(), &restore),
+                OutputStream::Stderr => self.terminal.write_stderr(data.as_bytes(), &restore),
             }
             return;
         }
@@ -220,7 +263,10 @@ impl AppOutput {
                 synchronize(&mut final_output);
             }
         }
+        final_output.splice(..0, self.restore_modes());
         self.terminal.restore(&final_output);
+        self.paste_mode = false;
+        self.kitty_protocol = false;
     }
 }
 
@@ -232,6 +278,7 @@ impl WriteDestination for RefCell<AppOutput> {
 
 pub(crate) struct App {
     raw_mode: bool,
+    kitty_query: Option<(KittyFlags, Instant)>,
     runtime: Option<Runtime>,
     queue: Arc<UpdateQueue>,
     exit_result: Option<ExitResult>,
@@ -270,6 +317,7 @@ impl App {
         mut terminal: Box<dyn Terminal>,
         interactive: bool,
         color_level: ColorLevel,
+        now: Instant,
     ) -> Self {
         let size = WindowSize::resolve(terminal.size());
         let WindowSize { columns, rows } = size;
@@ -296,13 +344,32 @@ impl App {
             tty,
             interactive,
             alternate,
+            paste_mode: false,
+            kitty_protocol: false,
             static_rows: Vec::new(),
             last_frame: None,
             last_cursor: None,
         }));
+        // Ink initKittyKeyboard follows setAlternateScreen, before the first frame.
+        let mut kitty_query = None;
+        {
+            let mut output = destination.borrow_mut();
+            if tty && output.terminal.stdin_is_tty() {
+                match options.kitty_keyboard {
+                    KittyKeyboard::Enabled(flags) => output.enable_kitty(flags),
+                    KittyKeyboard::Auto(flags) if interactive => {
+                        kitty_query = Some((flags, now + Duration::from_millis(200)));
+                        let restore = output.restore_bytes();
+                        output.terminal.write(b"\x1b[?u", &restore);
+                    }
+                    _ => {}
+                }
+            }
+        }
         runtime.set_destination(destination.clone());
         Self {
             raw_mode: false,
+            kitty_query,
             queue: runtime.queue(),
             runtime: Some(runtime),
             exit_result: None,
@@ -343,6 +410,12 @@ impl App {
     }
 
     pub(crate) fn render_if_due(&mut self, now: Instant) -> Option<Instant> {
+        if self
+            .kitty_query
+            .is_some_and(|(_, deadline)| now >= deadline)
+        {
+            self.kitty_query = None;
+        }
         let runtime = self.runtime.as_mut()?;
         runtime.flush_input(now);
         runtime.queue().drain();
@@ -373,6 +446,13 @@ impl App {
             self.pending |= cursor != runtime.cursor();
         }
         let raw_mode = runtime.input_holders() > 0;
+        let paste_mode = raw_mode && runtime.paste_holders() > 0;
+        // Ink switches paste inside effects; end-of-step comparison avoids
+        // mode writes for a use_paste swap in one commit. Disable paste before
+        // raw mode, and enable it after raw mode succeeds (use-paste.ts).
+        if !paste_mode {
+            self.destination.borrow_mut().set_paste_mode(false);
+        }
         if raw_mode != self.raw_mode {
             let mut destination = self.destination.borrow_mut();
             if raw_mode && !destination.terminal.stdin_is_tty() {
@@ -388,6 +468,9 @@ impl App {
                 self.raw_mode = raw_mode;
             }
         }
+        self.destination
+            .borrow_mut()
+            .set_paste_mode(self.raw_mode && paste_mode);
         if self.queue.has_exit() {
             self.unmount();
             return None;
@@ -403,8 +486,18 @@ impl App {
     }
 
     pub(crate) fn input(&mut self, bytes: &[u8], now: Instant) {
-        if let Some(runtime) = &mut self.runtime {
-            runtime.input(bytes, now);
+        if self
+            .kitty_query
+            .is_some_and(|(_, deadline)| now >= deadline)
+        {
+            self.kitty_query = None;
+        }
+        if self.raw_mode
+            && let Some(runtime) = &mut self.runtime
+            && runtime.input(bytes, now)
+            && let Some((flags, _)) = self.kitty_query.take()
+        {
+            self.destination.borrow_mut().enable_kitty(flags);
         }
     }
 
@@ -427,6 +520,7 @@ impl App {
         if self.runtime.is_none() {
             return;
         }
+        self.kitty_query = None;
         if self.raw_mode {
             self.destination.borrow_mut().terminal.set_raw_mode(false);
             self.raw_mode = false;
