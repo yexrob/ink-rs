@@ -92,6 +92,23 @@ fn combining_marks_and_joined_emoji_retain_their_graphemes() {
 }
 
 #[test]
+fn wrapped_text_normalizes_graphemes_and_uses_composed_widths() {
+    // string-width counts e-acute as 1 column and Tamil base + spacing mark as 2.
+    for wrap in [TextWrap::Wrap, TextWrap::Hard] {
+        let output = render(
+            View::new()
+                .border_style(BorderStyle::Single)
+                .width(5)
+                .child(Text::new("e\u{301}\u{b95}\u{bc6}\u{bbe}abc").wrap(wrap)),
+        );
+        assert_eq!(
+            output,
+            lines(&["┌───┐", "│\u{e9}\u{b95}\u{bca}│", "│abc│", "└───┘"]),
+        );
+    }
+}
+
+#[test]
 fn crlf_line_endings_do_not_overwrite_box_borders() {
     let output = render(
         View::new()

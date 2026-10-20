@@ -1,6 +1,9 @@
+use unicode_normalization::UnicodeNormalization;
+
 use crate::TextWrap;
 
 use super::styled::{StyledChar, StyledLine, StyledText, expand_tabs};
+use super::width::grapheme_width;
 
 /// Wraps or truncates each line to `max_width` columns; cells keep their
 /// style across the breaks this inserts.
@@ -11,7 +14,13 @@ pub(crate) fn wrap_text(lines: &[StyledLine], max_width: usize, wrap: TextWrap) 
         }
         lines
             .iter()
-            .flat_map(|line| wrap_line(&expand_tabs(line), max_width, wrap == TextWrap::Hard))
+            .flat_map(|line| {
+                wrap_line(
+                    &expand_tabs(&normalize_line(line)),
+                    max_width,
+                    wrap == TextWrap::Hard,
+                )
+            })
             .collect()
     } else {
         lines
@@ -19,6 +28,16 @@ pub(crate) fn wrap_text(lines: &[StyledLine], max_width: usize, wrap: TextWrap) 
             .map(|line| truncate(line, max_width, wrap))
             .collect()
     }
+}
+
+fn normalize_line(line: &[StyledChar]) -> StyledLine {
+    let mut line = line.to_vec();
+    // wrap-ansi NFC-normalizes text before expanding tabs and wrapping.
+    for cell in &mut line {
+        cell.grapheme = cell.grapheme.nfc().collect();
+        cell.width = grapheme_width(&cell.grapheme);
+    }
+    line
 }
 
 fn line_width(line: &[StyledChar]) -> usize {
