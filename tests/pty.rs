@@ -8,7 +8,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use ink_rs::{Element, Error, Options, Scope, Text, component, render};
+use ink_rs::{AnimationOptions, Element, Error, Options, Scope, Text, component, render};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use rustix::termios::{Termios, tcgetattr};
 
@@ -33,6 +33,8 @@ enum Case {
     Alive,
     CtrlC,
     Pipe,
+    AnimationPipe,
+    AnimationNonInteractive,
 }
 
 const CASES: &[(Case, &str, &str)] = &[
@@ -69,7 +71,31 @@ const CASES: &[(Case, &str, &str)] = &[
         "pipe",
         "#725: non-TTY child process output is flushed",
     ),
+    (
+        Case::AnimationPipe,
+        "use-animation-non-interactive-exit",
+        "useAnimation can drive non-interactive process exit",
+    ),
+    (
+        Case::AnimationNonInteractive,
+        "use-animation-interactive-false-exit",
+        "useAnimation can drive explicitly non-interactive process exit",
+    ),
 ];
+
+fn animation_exit(cx: &mut Scope, _: &()) -> Element {
+    let animation = cx.use_animation(AnimationOptions {
+        interval: Duration::from_millis(8),
+        ..AnimationOptions::default()
+    });
+    let handle = cx.use_app();
+    cx.use_effect(animation.frame, move || {
+        if animation.frame >= 3 {
+            handle.exit();
+        }
+    });
+    Text::new(animation.frame.to_string()).into()
+}
 
 struct Value {
     message: &'static str,
@@ -187,12 +213,14 @@ fn fixture(case: Case) -> Result {
     let element = match case {
         Case::Normal => Text::new("Hello World").into(),
         Case::Pipe => Text::new("ready-stdin-not-tty").into(),
+        Case::AnimationPipe | Case::AnimationNonInteractive => component(animation_exit, ()),
         _ => component(example, case),
     };
     let app = render(
         element,
         Options {
             exit_on_ctrl_c: case != Case::CtrlC,
+            interactive: (case == Case::AnimationNonInteractive).then_some(false),
             ..Options::default()
         },
     );
@@ -365,7 +393,7 @@ fn run_pty(case: Case, id: &str) -> Result {
     result
 }
 
-fn run_pipe(id: &str) -> Result {
+fn run_pipe(case: Case, id: &str) -> Result {
     let mut child = Command::new(std::env::current_exe()?)
         .env(FIXTURE, id)
         .env_remove("CI")
@@ -396,7 +424,7 @@ fn run_pipe(id: &str) -> Result {
                 }
             }
             if is_stdout {
-                assert_output(Case::Pipe, &output)?;
+                assert_output(case, &output)?;
             }
         }
         if !child.wait()?.success() {
@@ -430,8 +458,11 @@ fn main() {
     }
     let mut failed = 0;
     for &(case, id, name) in CASES {
-        let result = if case == Case::Pipe {
-            run_pipe(id)
+        let result = if matches!(
+            case,
+            Case::Pipe | Case::AnimationPipe | Case::AnimationNonInteractive
+        ) {
+            run_pipe(case, id)
         } else {
             run_pty(case, id)
         };

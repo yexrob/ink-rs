@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use taffy::{NodeId, Point};
 
@@ -18,6 +18,7 @@ use crate::{
 use hooks::{Hook, Kind, Value};
 use state::{NodeLayout, RenderGuard, Store};
 
+mod animation;
 mod app_handle;
 mod focus;
 mod hooks;
@@ -28,6 +29,7 @@ mod state;
 #[cfg(test)]
 mod tests;
 
+pub use animation::{Animation, AnimationOptions};
 pub use app_handle::AppHandle;
 pub(crate) use app_handle::{ExitResult, UpdateQueue, Wake};
 pub use focus::{FocusManager, FocusOptions};
@@ -449,15 +451,21 @@ impl Runtime {
         now: Instant,
         write: impl FnOnce(paint::Frame),
     ) -> Option<Instant> {
+        self.tick_animations(now, Duration::ZERO);
+        self.flush_input(now);
         self.queue().drain();
-        if !self.has_work() {
-            return self.queue().has_pending().then_some(now);
+        if self.has_work() {
+            self.commit();
+            write(self.paint());
+            self.passive_effects();
+            self.after_write();
         }
-        self.commit();
-        write(self.paint());
-        self.passive_effects();
-        self.after_write();
-        (self.has_work() || self.queue().has_pending()).then_some(now)
+        (self.has_work() || self.queue().has_pending())
+            .then_some(now)
+            .into_iter()
+            .chain(self.input_deadline())
+            .chain(self.animation_deadline(Duration::ZERO))
+            .min()
     }
 
     pub(crate) fn has_work(&self) -> bool {

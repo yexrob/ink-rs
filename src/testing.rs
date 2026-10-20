@@ -106,12 +106,17 @@ impl TestInstance {
         self.settle();
     }
 
-    /// Advances the instance clock, flushes pending input and settles the tree.
+    /// Runs a step now, then every due step through the target time.
     /// Advancing by 20 ms after a lone Esc delivers it to focus and input hooks.
     pub fn advance(&mut self, duration: Duration) {
-        self.now += duration;
-        self.runtime.flush_input(self.now);
-        self.settle();
+        let target = self.now + duration;
+        while let Some(due) = self.step() {
+            if due > target {
+                break;
+            }
+            self.now = due;
+        }
+        self.now = target;
     }
 
     /// The last debug stdout entry, from a present or an external write.
@@ -143,9 +148,9 @@ impl TestInstance {
         self.step();
     }
 
-    /// Runs pending state updates and effects until the runtime is idle.
+    /// Runs pending state updates and effects without advancing the clock.
     pub fn settle(&mut self) {
-        while self.step().is_some() {}
+        while self.step().is_some_and(|due| due <= self.now) {}
     }
 
     /// Unmounts the tree and runs effect cleanups.

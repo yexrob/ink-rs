@@ -90,7 +90,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `reconciler.tsx` | 14 | M1 | 7 | `tests/reconciler.rs` |
 | `render-callback.tsx` | 4 | — | 0 | 缺 API / 不适用，见下文 |
 | `render-to-string.tsx` | 37 | M0 / M1 | 32 | `tests/render_to_string.rs` |
-| `render.tsx` | 119 | M2 / M3 | 33 | `tests/render.rs`、`tests/pty.rs` |
+| `render.tsx` | 119 | M2 / M3 / M4 | 35 | `tests/render.rs`、`tests/pty.rs` |
 | `rendering-regressions.tsx` | 2 | M0 | 2 | `tests/rendering_regressions.rs` |
 | `rerender-input.tsx` | 4 | M3 | 3 | `tests/rerender_input.rs` |
 | `sanitize-ansi.ts` | 50 | M0 | 50 | `src/text/sanitize/tests.rs` |
@@ -116,7 +116,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `text-width.tsx` | 18 | M0 | 18 | `tests/text_width.rs` |
 | `text.tsx` | 57 | M0 / M1 | 49 | `tests/text.rs` |
 | `truncate-width.tsx` | 9 | M0 | 9 | `tests/truncate_width.rs` |
-| `use-animation.tsx` | 45 | M4 |  |  |
+| `use-animation.tsx` | 45 | M4 | 38 | `tests/use_animation.rs` |
 | `use-box-metrics.tsx` | 19 | M4 | 16 | `tests/use_box_metrics.rs` |
 | `width-height.tsx` | 29 | M0 / M1 | 25 | `tests/width_height.rs` |
 | `wrap-text.tsx` | 17 | M0 / M1 | 15 | `tests/wrap_text.rs`, `src/text/wrap/tests.rs` |
@@ -271,7 +271,6 @@ Ink 有 95 个测试文件、1,646 个测试。
 - 不适用，React transition：`transition example deletes a whole grapheme from both queries`、`transition example ignores Enter in the search query`。
 - 不适用，断言 Ink 的整屏清除或逐行擦除次数；ink-rs 使用高度上限和 cell diff：`erase screen`、`erase screen where <Static> exists but interactive part is taller than viewport`、`erase screen where state changes in small viewport`、`#450: full-height rerenders should not repeatedly clear terminal`、`#450: shrink from full-height to rows - 1 should clear exactly once`、`#450: shrink from overflow to rows - 1 should clear exactly once`、`#450: <Static> with shrink from full-height should clear exactly once`、`#450: full-height rerenders with <Static> should not repeatedly clear terminal`。
 - 不适用，Windows 不在 v1 范围内：`#969: full-height rerenders on Windows should clear terminal between frames`。
-- M4，useAnimation：`useAnimation can drive non-interactive process exit`、`useAnimation can drive explicitly non-interactive process exit`。
 - 重复，incrementalRendering 变体；ink-rs 的输出路径是 cell diff：`preserve terminal history when rerendering after clear - incremental`、`full clears do not replay <Static> output into scrollback - incremental`、`growing into an overflowing frame keeps <Static> rows that are still in the viewport - incremental`、`<Static> items added while the frame overflows are written once - incremental`、`alternate screen replays <Static> output when the frame shrinks after overflowing - incremental`、`alternate screen replays <Static> items added while the frame overflows once - incremental`。
 - M5，屏幕阅读器：`preserve terminal history when rerendering after clear - screen-reader`、`clear screen-reader output`、`preserve screen-reader output around stdout writes`、`replace restored screen-reader output after clear and stdout write`、`replace screen-reader output ending in a newline after stdout write`、`preserve static history when screen-reader output resizes`、`rewrap screen-reader output when the terminal gets wider`。
 - 不适用，design.md 外部输出不捕获 console：`intercept console methods with omitted patchConsole option`、`intercept console methods with undefined patchConsole option`。
@@ -347,6 +346,10 @@ Ink 有 95 个测试文件、1,646 个测试。
 
 ## M4 文件中不移植的测试
 
+- `use-animation.tsx`：
+  - 不适用，`Duration` 无法表示：`treats NaN interval as the default interval`、`treats Infinity interval as the default interval`、`treats negative Infinity interval as the default interval`、`clamps negative interval to 1ms`。
+  - 不适用，核心不读时钟：`wall clock changes do not move animations backwards`。
+  - 不适用，没有并发渲染与 transition：`concurrent aborted renders do not suppress interval reset`、`suspended transitions do not reset the committed animation before commit`。
 - `use-box-metrics.tsx`：
   - 不适用，Node EventEmitter；unmount 消耗 app：`removes resize listener on unmount`、`does not crash when resize fires after unmount`。
   - 并发：`tracks a box mounted by child state - concurrent=true`。
@@ -367,7 +370,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 - **输入的观测边界。** `hooks-use-input*.tsx` 与 `exit-keyboard.tsx` 不跑 PTY fixture，在进程内用 `testing::mount` 重建 fixture：条件匹配时请求退出，不匹配时 panic，`exit_result()` 为 `Some(Ok(None))` 代替 `exited` 与退出码。单独的 Esc 和不完整序列用 `advance(20ms)` 交出；连续方向键在一次读取中送入。`hooks.tsx` 的 `useInput - ignore input if not active` 没有定时器，用保留的 `AppHandle` 代替 fixture 的 100ms 退出，检查屏幕首行为 `x`。`components.tsx` 的 raw mode 用例用 `TestTerminal::raw_mode_calls()` 的完整序列代替 `setRawMode` 的 spy，去掉 ref/unref 与监听器数量断言；关闭在步骤结束时发生，代替 Ink 的微任务。`setRawMode() should throw if raw mode is not supported` 改为应用以 `ErrorKind::Unsupported` 退出，且没有切换调用。`cursor.tsx` 的输入用例检查 vt100 光标位置与可见性；空格用例保留 write 次数增长，滚动用例保留擦除期间的隐藏光标字节。`input-keypad-enter.tsx` 把两个投影数组断言合成 `(input, enter)` 对的比较。`rerender-input.tsx` 用测试时钟代替 FakeTimers。`hooks-use-paste.tsx` 同样重建 fixture。`kitty-negotiation.tsx` 不公开 `resolveFlags`，flags 断言改为检查写出的 `CSI >24u`、`CSI >25u`。`kitty-keyboard.tsx` 的假流改为 `TestTerminal` 的 TTY 设置；同步回复用例在挂载后送入回复，此时 raw mode 已开启；卸载后的迟到回复用例经保留的 `AppHandle` 退出，再送入回复。
 - **焦点的观测边界。** `focus*.tsx` 读 stdout spy 的断言改为 `testing::render` 的 `last_frame()`，期望文本不变。`undefined` 改为 `None`，空 ID 为 `Some("")`。`delay`、`act`、`waitUntilRenderFlush` 改为步进或 `settle`；单独 Esc 后的 50ms 等待改为 `advance(20ms)`。在 render 中读取 `activeId` 的用例保留 render 读取；捕获 manager 的用例在步进后读 `active_id()`。`focus.tsx` 移植 44 个用例：Ink 用表循环生成的 16 个 kitty 修饰键用例在 Rust 中是一个表测试，失败信息保留 Ink 用例名，共 29 个 `#[test]`。React 条件渲染的 `null` 改为空 fragment，保留子节点位置。
 - **退出的观测边界。** `render.tsx` 的 `waitUntilExit resolves first exit value when duplicate exits happen during teardown` 没有 Node 写回调屏障，改为 effect cleanup 在卸载中请求第二次退出，测试保留的 handle 在退出后再请求一次，结果仍为第一次的值。`exit.tsx` 的 `exit on exit() with error and static output` 不跑 PTY fixture，在进程内用 `testing::mount` 读取退出结果，输出期望不变。`components.tsx` 的两个备用屏退出用例只检查错误消息，Rust 错误没有 JS 调用栈。
-- **进程的观测边界。** `exit.tsx` 的 11 个进程用例、`hooks.tsx` 的 ``useInput - handle Ctrl+C when `exitOnCtrlC` is `false` `` 与 `render.tsx` 的 `#725: non-TTY child process output is flushed` 在 `tests/pty.rs` 中重建 fixture。Node 定时器改为线程加 `AppHandle`；外部 `unmount()` 改为 `Instance::handle().exit()`，`wait_until_exit` 消耗 `Instance`。`exit when app finishes execution` 的 fixture 调用 `wait_until_exit` 驱动更新。`#725` 没有 `use_stdin`，fixture 渲染固定文本，代替 stdin 是否为 TTY 的输出。`exit on exit() with raw mode` 另检查退出后的 termios 与开启前相同。macOS 在 `ICANON` 切换后置 `PENDIN`，检查前用零超时的 poll 让内核处理，不读取输入、不屏蔽标志。`src/driver/tests.rs` 与 `src/driver/stdin.rs` 另有 4 个原生测试，覆盖 Ink fixture 不涉及的规则：相邻输入合并且不越过其他消息、EOF 后在更新完成时自然结束、输入交给最后的持有者并在其释放后交给前一个、读错误进入首个错误槽。
+- **进程的观测边界。** `exit.tsx` 的 11 个进程用例、`hooks.tsx` 的 ``useInput - handle Ctrl+C when `exitOnCtrlC` is `false` `` 与 `render.tsx` 的 `#725: non-TTY child process output is flushed`、两个 `useAnimation can drive … non-interactive process exit` 在 `tests/pty.rs` 中重建 fixture；后三个走管道，不开 PTY。Node 定时器改为线程加 `AppHandle`；外部 `unmount()` 改为 `Instance::handle().exit()`，`wait_until_exit` 消耗 `Instance`。`exit when app finishes execution` 的 fixture 调用 `wait_until_exit` 驱动更新。`#725` 没有 `use_stdin`，fixture 渲染固定文本，代替 stdin 是否为 TTY 的输出。`exit on exit() with raw mode` 另检查退出后的 termios 与开启前相同。macOS 在 `ICANON` 切换后置 `PENDIN`，检查前用零超时的 poll 让内核处理，不读取输入、不屏蔽标志。`src/driver/tests.rs` 与 `src/driver/stdin.rs` 另有 4 个原生测试，覆盖 Ink fixture 不涉及的规则：相邻输入合并且不越过其他消息、EOF 后在更新完成时自然结束、输入交给最后的持有者并在其释放后交给前一个、读错误进入首个错误槽。
 - **log-update 的测试检查屏幕。** 移植版把输出的字节交给 vt100，检查屏幕、scrollback、光标的位置和可见性，以及没有写出字节。Ink 锁定字节的断言（`eraseLines` 的行数、`ESC E` 等）改为检查这些字节产生的屏幕。vt100 在待换行状态下执行 EL 不擦最后一格，xterm 会擦，所以 `full-width updates do not erase after the last character` 还检查字节：满宽的行之后没有 EL。
 - **视口高度代替末尾换行。** Ink 的 log-update 测试为每帧选择是否带末尾换行，ink-rs 由视口高度决定：帧高达到屏高时不带。移植版为每个测试选视口高度，让被断言的帧停在 Ink 的位置。`incremental rendering - no trailing newline: shrink` 从满屏缩短，两帧无法同时对上：缩短后光标按 design.md 停在帧的下一行，Ink 的测试停在帧的最后一行。Ink 的公开 render 退出满屏后，光标也停在帧的下一行。
 - **SGR 字节检查改为完整比较。** Ink 有 16 个测试用 `includes()` 检查 chalk 生成的 SGR 字节，如 `\x1b[41m`。移植版改用 `assert_ansi_eq` 比较完整输出，完整输出取自 Ink 测试运行时的记录。这样检查样式语义，不锁定 SGR 的写法。涉及 `background.tsx` 8 个、`border-backgrounds.tsx` 4 个、`borders.tsx` 1 个、`text.tsx` 3 个。
@@ -382,6 +385,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 
 - **layout effect 写状态时少写一帧。** Ink 在提交时写出，之后执行 layout effect，状态变了写第二帧。ink-rs 在 paint 前执行 layout effect，一帧写出一次。按写出次数或第一帧断言的测试随之调整。
 - **`use_box_metrics` 首帧给值。** Ink 先写出全 0 的帧，passive effect 加微任务后写出测量值。ink-rs 在提交的每一轮刷新 ref 之后比较读者的度量，变了就在 paint 前重渲染，View 首次布局的那一帧即带测量值。`does not trigger extra re-renders when layout is unchanged` 的渲染次数由 Ink 的 2–3 次改为 2 次（未挂载一次、测量后一次）；两个 resize 用例改用 `testing::mount` 与 vt100 屏幕。
+- **`use_animation` 的观测边界。** 假时钟逐个运行截止时间，代替 FakeTimers 的 `tickAsync`，时间下界改为精确值。不断言 JS 定时器的创建与清除次数，共享定时器由 `src/runtime/tests.rs` 的截止时间测试覆盖。`reset` 是句柄，`reset is a stable function reference` 改为用挂载时的副本重置。恢复与改 interval 的归零在 layout effect 中写状态，paint 前重算，不写过时帧。`animations advance in debug mode when interactive is false` 用非交互的 `testing::mount` 与 120 fps，ink-rs 没有运行时 debug 选项。
 - **Static 追加时写出一次。** Ink 的 Static 靠 index 状态和 layout effect 隐藏已写出的条目，每次追加提交两次、写出两次。ink-rs 的 Static 是 host 节点，追加时写出一次。
 
 ## Ink 期望中反直觉的行为

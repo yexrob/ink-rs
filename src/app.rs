@@ -414,6 +414,7 @@ impl App {
             self.kitty_query = None;
         }
         let runtime = self.runtime.as_mut()?;
+        runtime.tick_animations(now, self.window);
         runtime.flush_input(now);
         runtime.queue().drain();
         let commit = runtime.has_work().then(|| runtime.commit());
@@ -482,7 +483,10 @@ impl App {
         } else {
             None
         };
-        wake.into_iter().chain(runtime.input_deadline()).min()
+        wake.into_iter()
+            .chain(runtime.input_deadline())
+            .chain(runtime.animation_deadline(self.window))
+            .min()
     }
 
     pub(crate) fn input(&mut self, bytes: &[u8], now: Instant) {

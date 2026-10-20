@@ -71,15 +71,16 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
 - `dispatch(event)` 处理一个事件，`render_if_due(now)` 在需要时渲染一帧，返回下一次需要唤醒的时间 `Option<Instant>`，`None` 表示空闲。驱动按这个时间睡眠，空闲零唤醒由它保证。
 - 核心定义唤醒接口。其他线程经 `AppHandle` 提交更新，或 UI 线程上的任务写 `State`，两种情况通过它叫醒驱动。
 - 调度规则（批量更新、`max_fps`、空闲零唤醒）写在核心里，与驱动无关。测试驱动手动推进循环和假时钟。
-- app 管理节流窗口，runtime 不接收节流参数。Static 有新条目或身份改变时，提交后的绘制满足待绘制帧，但不打开或延长窗口。`max_fps = 0` 使用 0ms 窗口，同 Ink 的非正值分支。
+- **动画**：所有 `use_animation` 共用 Store 中的一个调度表，同 Ink App 的共享定时器。订阅从最近一步的时间开始，核心不读时钟。每步开头 tick：到期的条目按 Ink 的追赶公式 `start + (floor(elapsed / interval) + 1) * interval` 前移，迟到的唤醒跳过错过的格点，`frame` 随之跳变；距上次交付不足一个节流窗口的条目不写状态。截止时间是各条目在 `max(next_due, last_render + 窗口)` 之后的第一个格点的最小值，节流窗口内的唤醒不发生。tick 经 `State::set` 写值。暂停、改 interval、`reset` 释放订阅，恢复时在 layout effect 中归零并重新订阅，归零值在同一帧写出。`testing::render` 与 `render_to_string` 用 0 窗口。
+- app 管理节流窗口，runtime 不保存节流窗口：动画的 tick 与截止时间按 app 每步传入的窗口计算。Static 有新条目或身份改变时，提交后的绘制满足待绘制帧，但不打开或延长窗口。`max_fps = 0` 使用 0ms 窗口，同 Ink 的非正值分支。
 
 驱动有三个：
 
 - **同步驱动**：`render(element, Options) -> Instance` 挂载并运行首步后返回；交互首帧在返回前写出，非交互 live 帧仍在卸载时写出。`rerender`、`clear` 后各运行一步；`unmount(self)` 与 Drop 卸载。`wait_until_exit(self) -> Result<Option<Box<dyn Any + Send>>, Error>` 在调用线程排空更新队列、处理消息、用真实时钟步进，并阻塞等待消息或截止时间，结果见“退出”。`Instance` 为 `!Send`。信号线程以 SIGWINCH 通知尺寸变化；raw mode 期间读线程送来 stdin 字节，见“输入”。异步结果经 `AppHandle` 送回 UI 线程。
 - **tokio 驱动**（feature `tokio`，默认开启）：UI 循环跑在 `LocalSet` 上，`spawn_local` 派生的任务与 UI 同线程，可以写 `State`。任务句柄 drop 时 abort，组件卸载时任务随之取消。输入沿用读线程，经核心的唤醒接口叫醒 UI 循环；不用 `AsyncFd`，它要求在 stdin 的打开文件描述上设 `O_NONBLOCK`，这个标志与 shell 和其他读者共享。`use_future` 属于这个 feature。
-- **测试驱动**（`testing` 模块）：`mount(element, Options, &TestTerminal)` 挂载并运行首步；`advance` 从当前时间开始运行截止时间内的步骤。测试默认 CI=false、Basic 颜色，与 Ink 的测试 helper 一致。`testing::render` 保留不节流的帧记录模式，不添加运行时 debug 选项；它的 `input` 与 `advance` 用自己的测试时钟送入输入、交出等待中的 Esc，没有 raw mode 检查。
+- **测试驱动**（`testing` 模块）：`mount(element, Options, &TestTerminal)` 挂载并运行首步；`advance` 从当前时间开始运行截止时间内的步骤。测试默认 CI=false、Basic 颜色，与 Ink 的测试 helper 一致。`testing::render` 保留不节流的帧记录模式，不添加运行时 debug 选项；它的 `input` 与 `advance` 用自己的测试时钟送入输入、交出等待中的 Esc，没有 raw mode 检查；`settle` 不推进时钟，停在未来的截止时间前，`advance` 逐个运行目标时间内的截止时间，每个 tick 有自己的 `delta`。
 
-同步循环的自然结束条件集中在一处：步进返回 `None`，且没有外部 `AppHandle`、队列为空，对应 Ink `waitUntilExit` 的 Node `beforeExit`。无句柄的静态应用在首帧后结束；组件 render 中创建后丢弃的句柄不延长生命周期。raw mode 持有者不为 0 时不结束，对应 Node 的 `stdin.ref()`；stdin 读到 EOF 后不再算，之后有持有者重新开启 raw mode 时恢复；M4 定时器在此扩展。队列以 mutex 保护提交顺序和句柄计数；提交、最后句柄 drop、UI 状态写入通过核心 `Wake` 接口发消息。同步驱动的 mpsc 保留检查与睡眠之间的消息，不丢唤醒，不定期轮询。`TestApp` 在 rerender / advance 的步骤执行队列，`testing::render` 在 settle 的步骤执行；`render_to_string` 不执行渲染期间提交的更新，卸载丢弃它们。
+同步循环的自然结束条件集中在一处：步进返回 `None`，且没有外部 `AppHandle`、队列为空，对应 Ink `waitUntilExit` 的 Node `beforeExit`。无句柄的静态应用在首帧后结束；组件 render 中创建后丢弃的句柄不延长生命周期。raw mode 持有者不为 0 时不结束，对应 Node 的 `stdin.ref()`；stdin 读到 EOF 后不再算，之后有持有者重新开启 raw mode 时恢复；活动的动画给出唤醒时间，应用不结束，同 Ink 持有引用的定时器；暂停或卸载后不再计入。队列以 mutex 保护提交顺序和句柄计数；提交、最后句柄 drop、UI 状态写入通过核心 `Wake` 接口发消息。同步驱动的 mpsc 保留检查与睡眠之间的消息，不丢唤醒，不定期轮询。`TestApp` 在 rerender / advance 的步骤执行队列，`testing::render` 在 settle 的步骤执行；`render_to_string` 不执行渲染期间提交的更新，卸载丢弃它们。
 
 生产 Terminal 用 `IsTerminal` 查询 stdin 与 stdout，用 rustix `tcgetwinsize` 查询 stdout 的尺寸，失败返回 None，同 Node 的 `stdout.columns`。复制 fd 1/2 为 `File`，每个操作调用一次 `write_all` 后 flush，不经过 Rust stdout 的行缓冲。保留首个 I/O 错误并丢弃后续写入；循环在步骤边界结束、卸载并返回该错误，包括 Rust 忽略 SIGPIPE 后的 EPIPE。fd 复制或信号设施初始化失败也经此结果返回，未开启终端模式。
 

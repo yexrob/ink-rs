@@ -1,7 +1,9 @@
 use std::any::{Any, TypeId};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
 
+use super::animation::{Animation, AnimationOptions, Subscription, Values};
 use super::focus::{FocusManager, FocusOptions, FocusRegistration};
 use super::input::{Handler, InputHandler, PasteHandler, Registration};
 use super::output::{CursorCleanup, CursorPosition, OutputStream, OutputWriter};
@@ -167,6 +169,31 @@ impl Scope<'_> {
         // Ink use-window-size.ts rechecks at subscription. Reading during
         // render registers the reader before any commit effects can resize.
         self.store.window_size.get()
+    }
+
+    /// Drives an animation using the runtime's shared timer. Values start at zero.
+    /// Pausing freezes values; resuming or changing the interval restarts at zero.
+    /// [`Animation::reset`] restarts the live hook, even from an earlier copy.
+    /// Live apps limit delivered ticks using [`crate::Options::max_fps`]; skipped
+    /// ticks contribute to elapsed time and delta. [`crate::testing::render`]
+    /// does not throttle.
+    /// An active animation keeps a live app running until it pauses or unmounts.
+    pub fn use_animation(&mut self, options: AnimationOptions) -> Animation {
+        let interval = options.interval.clamp(
+            Duration::from_millis(1),
+            Duration::from_millis(2_147_483_647),
+        );
+        let values = self.use_state(Values::default);
+        let reset_key = self.use_state(|| 0_u64);
+        let store = self.store.clone();
+        self.use_layout_effect((options.active, interval, reset_key.get()), move || {
+            options.active.then(|| {
+                // Unlike Ink's render-time reset, layout writes settle before paint.
+                values.set(Values::default());
+                Subscription::new(store, interval, values)
+            })
+        });
+        Animation::new(values, reset_key)
     }
 
     /// Declares the terminal cursor in cells relative to the live frame, below
