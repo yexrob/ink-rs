@@ -5,7 +5,7 @@ use common::to_markup;
 use ink_rs::testing::{TestTerminal, mount};
 use ink_rs::{Element, Error, Options, Scope, Static, Text, component};
 
-// The remaining PTY fixture tests belong to a later phase.
+// The process-lifetime fixtures are ported in tests/pty.rs.
 
 #[test]
 fn exit_on_exit_with_error_and_static_output() {

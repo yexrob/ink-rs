@@ -22,7 +22,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 
 ## 按文件
 
-里程碑为 M0 的文件，表中是移植的部分，其余见下一节。"—" 表示不适用：`build-output.ts` 检查 npm 包的构建产物，`is-devtools-reachable.tsx` 测 React DevTools 的连接，`style-types.ts` 是 TypeScript 类型检查，Rust 由类型系统保证。`styles.ts` 直接调用 Yoga 的 API，去掉样式后的行为由各布局文件的重渲染测试和 `style-update-consistency.tsx` 覆盖。`static-abandoned-render.tsx` 依赖 Suspense 和 transition。
+里程碑为 M0 的文件，表中是移植的部分，其余见下一节。"—" 表示不适用：`build-output.ts` 检查 npm 包的构建产物，`is-devtools-reachable.tsx` 测 React DevTools 的连接，`style-types.ts` 是 TypeScript 类型检查，Rust 由类型系统保证。`styles.ts` 直接调用 Yoga 的 API，去掉样式后的行为由各布局文件的重渲染测试和 `style-update-consistency.tsx` 覆盖。`static-abandoned-render.tsx` 依赖 Suspense 和 transition。`tests/pty.rs` 不用 libtest，其中每个 PTY 用例按一个 `#[test]` 计数。
 
 | Ink 文件 | Ink 测试数 | 里程碑 | 移植的 `#[test]` | Rust 文件 |
 |---|---|---|---|---|
@@ -49,7 +49,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `error-overview.tsx` | 7 | M4 |  |  |
 | `errors.tsx` | 8 | M4 |  |  |
 | `exit-keyboard.tsx` | 7 | M3 | 7 | `tests/exit_keyboard.rs` |
-| `exit.tsx` | 15 | M3 | 1 | `tests/exit.rs` |
+| `exit.tsx` | 15 | M3 | 12 | `tests/exit.rs`、`tests/pty.rs` |
 | `flex-align-content.tsx` | 13 | M0 / M1 | 11 | `tests/flex_align_content.rs` |
 | `flex-align-items.tsx` | 9 | M0 | 9 | `tests/flex_align_items.rs` |
 | `flex-align-self.tsx` | 9 | M0 | 9 | `tests/flex_align_self.rs` |
@@ -66,7 +66,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `hooks-use-input-navigation.tsx` | 18 | M3 | 18 | `tests/hooks_use_input_navigation.rs` |
 | `hooks-use-input.tsx` | 34 | M3 | 32 | `tests/hooks_use_input.rs` |
 | `hooks-use-paste.tsx` | 4 | M3 | 4 | `tests/hooks_use_paste.rs` |
-| `hooks.tsx` | 6 | M2 / M3 | 4 | `tests/hooks.rs` |
+| `hooks.tsx` | 6 | M2 / M3 | 5 | `tests/hooks.rs`、`tests/pty.rs` |
 | `input-buffered-ctrl-c.tsx` | 5 | M3 | 5 | `tests/input_buffered_ctrl_c.rs` |
 | `input-keypad-enter.tsx` | 2 | M3 | 2 | `tests/input_keypad_enter.rs` |
 | `input-parser.ts` | 65 | M3 | 65 | `src/input/parser/tests.rs` |
@@ -90,7 +90,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `reconciler.tsx` | 14 | M1 | 7 | `tests/reconciler.rs` |
 | `render-callback.tsx` | 4 | — | 0 | 缺 API / 不适用，见下文 |
 | `render-to-string.tsx` | 37 | M0 / M1 | 32 | `tests/render_to_string.rs` |
-| `render.tsx` | 119 | M2 / M3 | 32 | `tests/render.rs` |
+| `render.tsx` | 119 | M2 / M3 | 33 | `tests/render.rs`、`tests/pty.rs` |
 | `rendering-regressions.tsx` | 2 | M0 | 2 | `tests/rendering_regressions.rs` |
 | `rerender-input.tsx` | 4 | M3 | 3 | `tests/rerender_input.rs` |
 | `sanitize-ansi.ts` | 50 | M0 | 50 | `src/text/sanitize/tests.rs` |
@@ -256,7 +256,6 @@ Ink 有 95 个测试文件、1,646 个测试。
 
 ### `hooks.tsx`
 
-- M3 进程驱动，PTY：``useInput - handle Ctrl+C when `exitOnCtrlC` is `false` ``。传统 `\x03` 要等 termios 清除 `ISIG` 才交给回调，进程内测试检查不到。
 - 不适用，Node EventEmitter 的监听器上限：`useInput - no MaxListenersExceededWarning with many useInput hooks`。
 
 ### `cursor-helpers.tsx`、`line-update.ts`
@@ -272,7 +271,6 @@ Ink 有 95 个测试文件、1,646 个测试。
 - 不适用，React transition：`transition example deletes a whole grapheme from both queries`、`transition example ignores Enter in the search query`。
 - 不适用，断言 Ink 的整屏清除或逐行擦除次数；ink-rs 使用高度上限和 cell diff：`erase screen`、`erase screen where <Static> exists but interactive part is taller than viewport`、`erase screen where state changes in small viewport`、`#450: full-height rerenders should not repeatedly clear terminal`、`#450: shrink from full-height to rows - 1 should clear exactly once`、`#450: shrink from overflow to rows - 1 should clear exactly once`、`#450: <Static> with shrink from full-height should clear exactly once`、`#450: full-height rerenders with <Static> should not repeatedly clear terminal`。
 - 不适用，Windows 不在 v1 范围内：`#969: full-height rerenders on Windows should clear terminal between frames`。
-- M3 进程驱动：`#725: non-TTY child process output is flushed`。
 - M4，useAnimation：`useAnimation can drive non-interactive process exit`、`useAnimation can drive explicitly non-interactive process exit`。
 - 重复，incrementalRendering 变体；ink-rs 的输出路径是 cell diff：`preserve terminal history when rerendering after clear - incremental`、`full clears do not replay <Static> output into scrollback - incremental`、`growing into an overflowing frame keeps <Static> rows that are still in the viewport - incremental`、`<Static> items added while the frame overflows are written once - incremental`、`alternate screen replays <Static> output when the frame shrinks after overflowing - incremental`、`alternate screen replays <Static> items added while the frame overflows once - incremental`。
 - M5，屏幕阅读器：`preserve terminal history when rerendering after clear - screen-reader`、`clear screen-reader output`、`preserve screen-reader output around stdout writes`、`replace restored screen-reader output after clear and stdout write`、`replace screen-reader output ending in a newline after stdout write`、`preserve static history when screen-reader output resizes`、`rewrap screen-reader output when the terminal gets wider`。
@@ -338,6 +336,10 @@ Ink 有 95 个测试文件、1,646 个测试。
   - 不适用，React transition 与 discrete 优先级：`useInput - discrete priority keeps states in sync with useTransition during rapid input`。
   - 重复：`useInput - handle remove (delete)` 与 `useInput - handle delete` 输入相同，fixture 条件相同。
 - `rerender-input.tsx`：不适用，Node stdin 的 `readable` 监听器：`rerender() does not detach and reattach the stdin readable listener`。
+- `exit.tsx`：
+  - 不适用：`exit on exit() with error with value property`。Ink 按对象属性区分错误与结果值；ink-rs 用 `exit_with_error` 与 `exit_with` 两个方法区分。
+  - 不适用，React 开发模式：`exit when DEV is set`。
+  - M4，组件抛错：`exit with thrown error`。
 - `focus.tsx`：
   - 不适用：`generated focus IDs remain distinct when random values collide`。生成的 ID 来自 runtime 内计数，没有随机源；Tab 在三个生成 ID 间切换的用例检查它们互不相同。
   - React 并发模式下的重复：`focus component renders in concurrent mode`、`focus component with autoFocus renders in concurrent mode`。
@@ -359,6 +361,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 - **输入的观测边界。** `hooks-use-input*.tsx` 与 `exit-keyboard.tsx` 不跑 PTY fixture，在进程内用 `testing::mount` 重建 fixture：条件匹配时请求退出，不匹配时 panic，`exit_result()` 为 `Some(Ok(None))` 代替 `exited` 与退出码。单独的 Esc 和不完整序列用 `advance(20ms)` 交出；连续方向键在一次读取中送入。`hooks.tsx` 的 `useInput - ignore input if not active` 没有定时器，用保留的 `AppHandle` 代替 fixture 的 100ms 退出，检查屏幕首行为 `x`。`components.tsx` 的 raw mode 用例用 `TestTerminal::raw_mode_calls()` 的完整序列代替 `setRawMode` 的 spy，去掉 ref/unref 与监听器数量断言；关闭在步骤结束时发生，代替 Ink 的微任务。`setRawMode() should throw if raw mode is not supported` 改为应用以 `ErrorKind::Unsupported` 退出，且没有切换调用。`cursor.tsx` 的输入用例检查 vt100 光标位置与可见性；空格用例保留 write 次数增长，滚动用例保留擦除期间的隐藏光标字节。`input-keypad-enter.tsx` 把两个投影数组断言合成 `(input, enter)` 对的比较。`rerender-input.tsx` 用测试时钟代替 FakeTimers。`hooks-use-paste.tsx` 同样重建 fixture。`kitty-negotiation.tsx` 不公开 `resolveFlags`，flags 断言改为检查写出的 `CSI >24u`、`CSI >25u`。`kitty-keyboard.tsx` 的假流改为 `TestTerminal` 的 TTY 设置；同步回复用例在挂载后送入回复，此时 raw mode 已开启；卸载后的迟到回复用例经保留的 `AppHandle` 退出，再送入回复。
 - **焦点的观测边界。** `focus*.tsx` 读 stdout spy 的断言改为 `testing::render` 的 `last_frame()`，期望文本不变。`undefined` 改为 `None`，空 ID 为 `Some("")`。`delay`、`act`、`waitUntilRenderFlush` 改为步进或 `settle`；单独 Esc 后的 50ms 等待改为 `advance(20ms)`。在 render 中读取 `activeId` 的用例保留 render 读取；捕获 manager 的用例在步进后读 `active_id()`。`focus.tsx` 移植 44 个用例：Ink 用表循环生成的 16 个 kitty 修饰键用例在 Rust 中是一个表测试，失败信息保留 Ink 用例名，共 29 个 `#[test]`。React 条件渲染的 `null` 改为空 fragment，保留子节点位置。
 - **退出的观测边界。** `render.tsx` 的 `waitUntilExit resolves first exit value when duplicate exits happen during teardown` 没有 Node 写回调屏障，改为 effect cleanup 在卸载中请求第二次退出，测试保留的 handle 在退出后再请求一次，结果仍为第一次的值。`exit.tsx` 的 `exit on exit() with error and static output` 不跑 PTY fixture，在进程内用 `testing::mount` 读取退出结果，输出期望不变。`components.tsx` 的两个备用屏退出用例只检查错误消息，Rust 错误没有 JS 调用栈。
+- **进程的观测边界。** `exit.tsx` 的 11 个进程用例、`hooks.tsx` 的 ``useInput - handle Ctrl+C when `exitOnCtrlC` is `false` `` 与 `render.tsx` 的 `#725: non-TTY child process output is flushed` 在 `tests/pty.rs` 中重建 fixture。Node 定时器改为线程加 `AppHandle`；外部 `unmount()` 改为 `Instance::handle().exit()`，`wait_until_exit` 消耗 `Instance`。`exit when app finishes execution` 的 fixture 调用 `wait_until_exit` 驱动更新。`#725` 没有 `use_stdin`，fixture 渲染固定文本，代替 stdin 是否为 TTY 的输出。`exit on exit() with raw mode` 另检查退出后的 termios 与开启前相同。macOS 在 `ICANON` 切换后置 `PENDIN`，检查前用零超时的 poll 让内核处理，不读取输入、不屏蔽标志。`src/driver/tests.rs` 与 `src/driver/stdin.rs` 另有 4 个原生测试，覆盖 Ink fixture 不涉及的规则：相邻输入合并且不越过其他消息、EOF 后在更新完成时自然结束、输入交给最后的持有者并在其释放后交给前一个、读错误进入首个错误槽。
 - **log-update 的测试检查屏幕。** 移植版把输出的字节交给 vt100，检查屏幕、scrollback、光标的位置和可见性，以及没有写出字节。Ink 锁定字节的断言（`eraseLines` 的行数、`ESC E` 等）改为检查这些字节产生的屏幕。vt100 在待换行状态下执行 EL 不擦最后一格，xterm 会擦，所以 `full-width updates do not erase after the last character` 还检查字节：满宽的行之后没有 EL。
 - **视口高度代替末尾换行。** Ink 的 log-update 测试为每帧选择是否带末尾换行，ink-rs 由视口高度决定：帧高达到屏高时不带。移植版为每个测试选视口高度，让被断言的帧停在 Ink 的位置。`incremental rendering - no trailing newline: shrink` 从满屏缩短，两帧无法同时对上：缩短后光标按 design.md 停在帧的下一行，Ink 的测试停在帧的最后一行。Ink 的公开 render 退出满屏后，光标也停在帧的下一行。
 - **SGR 字节检查改为完整比较。** Ink 有 16 个测试用 `includes()` 检查 chalk 生成的 SGR 字节，如 `\x1b[41m`。移植版改用 `assert_ansi_eq` 比较完整输出，完整输出取自 Ink 测试运行时的记录。这样检查样式语义，不锁定 SGR 的写法。涉及 `background.tsx` 8 个、`border-backgrounds.tsx` 4 个、`borders.tsx` 1 个、`text.tsx` 3 个。
