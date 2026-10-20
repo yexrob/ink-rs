@@ -104,3 +104,33 @@ fn use_stderr_write_to_stderr() {
         ["Hello from Ink to stderr", "Hello World", "exited"]
     );
 }
+
+#[test]
+fn external_write_newline_before_reset_has_no_blank_row() {
+    for stream in [OutputStream::Stdout, OutputStream::Stderr] {
+        let terminal = TestTerminal::new(100, 24);
+        let _app = mount(
+            component(
+                |cx: &mut Scope, stream: &OutputStream| {
+                    let writer = match stream {
+                        OutputStream::Stdout => cx.use_stdout(),
+                        OutputStream::Stderr => cx.use_stderr(),
+                    };
+                    cx.use_effect((), move || writer.write("\x1b[31mabc\n\x1b[0m"));
+                    Text::new("Hello World").into()
+                },
+                stream,
+            ),
+            Options {
+                interactive: Some(true),
+                ..Options::default()
+            },
+            &terminal,
+        );
+        assert_eq!(
+            &Screen::new(&terminal, 100, 24).rows()[..2],
+            ["abc", "Hello World"],
+            "{stream:?}"
+        );
+    }
+}

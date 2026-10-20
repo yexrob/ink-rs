@@ -8,6 +8,7 @@ use crate::output::Output;
 use crate::paint::{Cell, Frame, serialize_row};
 use crate::runtime::{ExitResult, Runtime, UpdateQueue, WriteDestination};
 use crate::terminal::Terminal;
+use crate::text::ansi::{Token, tokenize};
 use crate::{
     ColorLevel, CursorPosition, Element, KittyFlags, KittyKeyboard, OutputStream, RenderOptions,
     WindowSize,
@@ -55,6 +56,17 @@ impl Default for Options {
 
 pub(crate) fn resolve_interactive(option: Option<bool>, in_ci: bool, tty: bool) -> bool {
     option.unwrap_or(tty && !in_ci)
+}
+
+fn needs_external_newline(data: &str) -> bool {
+    tokenize(data)
+        .into_iter()
+        .rev()
+        .find_map(|token| match token {
+            Token::Text(text) => text.chars().rev().find(|&c| c != '\r'),
+            _ => None,
+        })
+        .is_some_and(|c| c != '\n')
 }
 
 /// Keep synchronized-update boundaries in the same write as their payload.
@@ -235,10 +247,11 @@ impl AppOutput {
         }
         self.output.clear(&mut bytes);
         // libuv-style raw mode preserves OPOST and enables ONLCR: leave data
-        // newlines to the TTY. Unlike Ink, add a final line break when absent
-        // because cell-diff redraw starts at column zero on the following row.
+        // newlines to the TTY. Unlike Ink, add a line break after text that
+        // lacks one, ignoring escapes and CR, because cell-diff redraw starts
+        // at column zero on the following row.
         let mut data_bytes = data.as_bytes().to_vec();
-        if !data.ends_with('\n') {
+        if needs_external_newline(data) {
             data_bytes.extend_from_slice(b"\r\n");
         }
         match stream {
