@@ -5,16 +5,24 @@ use std::ffi::OsStr;
 use std::io::{self, Write};
 #[cfg(target_os = "macos")]
 use std::os::fd::AsRawFd;
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use ink_rs::{AnimationOptions, Element, Error, Options, Scope, Text, component, render};
+use ink_rs::{
+    AnimationOptions, Element, Error, FlexDirection, Options, Scope, Styled, Text, View, component,
+    render,
+};
 #[path = "common/pty.rs"]
 mod session;
-use rustix::termios::{Termios, tcgetattr};
-use session::{Session, collect};
+#[cfg(unix)]
+use rustix::termios::{Termios as InputMode, tcgetattr};
+use session::{Session, collect, contents_with_scrollback, printed};
+#[cfg(windows)]
+use windows_sys::Win32::System::Console::{CONSOLE_MODE as InputMode, GetConsoleMode};
 
 const FIXTURE: &str = "INK_RS_PTY_FIXTURE";
 const READY: &str = "__READY__";
@@ -43,8 +51,11 @@ enum Case {
     AnimationPipe,
     AnimationNonInteractive,
     Suspend,
+    #[cfg(unix)]
     JobControl,
+    #[cfg(unix)]
     Orphan,
+    FullHeightRerender,
     #[cfg(feature = "tokio")]
     TokioFinish,
     #[cfg(feature = "tokio")]
@@ -69,11 +80,13 @@ const CASES: &[(Case, &str, &str)] = &[
         "suspend",
         "suspendTerminal hands the terminal to a child process, then redraws (PTY)",
     ),
+    #[cfg(unix)]
     (
         Case::JobControl,
         "job-control",
         "Ctrl+Z hands the terminal to the shell and fg redraws",
     ),
+    #[cfg(unix)]
     (
         Case::Orphan,
         "orphan",
@@ -137,6 +150,11 @@ const CASES: &[(Case, &str, &str)] = &[
         "panic-during-unwind",
         "destructor panic restores before abort",
     ),
+    (
+        Case::FullHeightRerender,
+        "issue-969-windows-full-height-rerender",
+        "#969: full-height rerenders on Windows should clear terminal between frames; ink-rs keeps one final frame and no stale frames in screen or scrollback",
+    ),
 ];
 
 #[cfg(feature = "tokio")]
@@ -195,6 +213,7 @@ fn suspended_child(cx: &mut Scope, _: &()) -> Element {
     Text::new("Ink frame").into()
 }
 
+#[cfg(unix)]
 fn job_control(cx: &mut Scope, _: &()) -> Element {
     let quit = cx.use_state(|| false);
     cx.use_input(true, move |input, _| {
@@ -230,6 +249,41 @@ fn animation_exit(cx: &mut Scope, _: &()) -> Element {
         }
     });
     Text::new(animation.frame.to_string()).into()
+}
+
+// Ink issue-969-windows-full-height-rerender / issue-450-fixture-helpers.
+fn full_height_rerender(cx: &mut Scope, _: &()) -> Element {
+    let size = cx.use_window_size();
+    let frame = cx.use_state(|| 0);
+    let count = frame.get();
+    let handle = cx.use_app();
+    cx.use_effect(count, move || {
+        if count == 8 {
+            handle.exit();
+        } else {
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(100));
+                handle.update(move || frame.set(count + 1));
+            });
+        }
+    });
+    View::new()
+        .height(size.rows)
+        .flex_direction(FlexDirection::Column)
+        .child(Text::new("#450 top"))
+        .child(
+            View::new()
+                .flex_grow(1.0)
+                .child(Text::new(format!("frame {count}"))),
+        )
+        // Change the padding each frame so cell diffs write the bottom-right cell.
+        .child(Text::new(format!(
+            "#450 bottom{}",
+            count
+                .to_string()
+                .repeat(usize::from(size.columns).saturating_sub("#450 bottom".len()))
+        )))
+        .into()
 }
 
 struct Value {
@@ -312,7 +366,8 @@ fn example(cx: &mut Scope, case: &Case) -> Element {
 // rustix Termios does not implement PartialEq; compare its semantic fields,
 // not struct padding. SpecialCodes exposes every slot through Debug.
 // These are the fields exposed on Linux and macOS.
-fn same_termios(a: &Termios, b: &Termios) -> bool {
+#[cfg(unix)]
+fn same_input_mode(a: &InputMode, b: &InputMode) -> bool {
     #[cfg(target_os = "linux")]
     if a.line_discipline != b.line_discipline {
         return false;
@@ -326,7 +381,8 @@ fn same_termios(a: &Termios, b: &Termios) -> bool {
         && a.output_speed() == b.output_speed()
 }
 
-fn stdin_termios() -> Result<Termios> {
+#[cfg(unix)]
+fn stdin_mode() -> Result<InputMode> {
     // XNU bsd/kern/tty.c: ttioctl_locked sets PENDIN on an ICANON
     // transition and preserves it across tcsetattr. ttyselect -> ttnread
     // settles that pending reprocessing. Observe readiness without reading,
@@ -341,6 +397,23 @@ fn stdin_termios() -> Result<Termios> {
         Some(Duration::ZERO),
     )?;
     Ok(tcgetattr(io::stdin())?)
+}
+
+#[cfg(windows)]
+fn same_input_mode(a: &InputMode, b: &InputMode) -> bool {
+    a == b
+}
+
+#[cfg(windows)]
+fn stdin_mode() -> Result<InputMode> {
+    let stdin = io::stdin();
+    let mut mode = 0;
+    // SAFETY: stdin keeps its borrowed handle alive for the call, and mode is
+    // a valid writable CONSOLE_MODE. GetConsoleMode does not retain either.
+    if unsafe { GetConsoleMode(stdin.as_raw_handle(), &mut mode) } == 0 {
+        return Err(io::Error::last_os_error().into());
+    }
+    Ok(mode)
 }
 
 fn nested_panic(cx: &mut Scope, fail: &bool) -> Element {
@@ -387,7 +460,7 @@ fn fixture(case: Case) -> Result {
         .unmount();
     }
     let before = matches!(case, Case::Raw | Case::Thrown | Case::ThrownCoreFirst)
-        .then(stdin_termios)
+        .then(stdin_mode)
         .transpose()?;
     let element = match case {
         Case::Normal => Text::new("Hello World").into(),
@@ -396,7 +469,9 @@ fn fixture(case: Case) -> Result {
         Case::Pipe => Text::new("ready-stdin-not-tty").into(),
         Case::AnimationPipe | Case::AnimationNonInteractive => component(animation_exit, ()),
         Case::Suspend => component(suspended_child, ()),
+        #[cfg(unix)]
         Case::JobControl | Case::Orphan => component(job_control, ()),
+        Case::FullHeightRerender => component(full_height_rerender, ()),
         _ => component(example, case),
     };
     let mut app = render(
@@ -450,24 +525,38 @@ fn fixture(case: Case) -> Result {
         _ => return Err("wrong exit result".into()),
     }
     if let Some(before) = before {
-        let after = stdin_termios()?;
-        if !same_termios(&before, &after) {
+        let after = stdin_mode()?;
+        if !same_input_mode(&before, &after) {
             return Err(
-                format!("termios was not restored: before={before:?} after={after:?}").into(),
+                format!("input mode was not restored: before={before:?} after={after:?}").into(),
             );
         }
-        println!("termios-restored");
+        println!("input-mode-restored");
     }
     println!("exited");
     Ok(())
 }
 
-fn assert_output(case: Case, output: &[u8]) -> Result {
+// printed is what the child wrote: the bytes of a pipe or a Unix PTY, or
+// conhost's screen and history under ConPTY (session::printed).
+fn assert_output(case: Case, output: &[u8], printed: &str) -> Result {
+    let mut parser = vt100::Parser::new(24, 100, 1000);
+    parser.process(output);
     let output = String::from_utf8_lossy(output);
     let handover = case == Case::Suspend;
     #[cfg(feature = "tokio")]
     let handover = handover || case == Case::TokioSuspend;
-    if handover {
+    if handover && cfg!(windows) {
+        // conhost repaints the screen and does not forward ink-rs's cursor sequences.
+        if !printed.contains("CHILD_OUTPUT")
+            || !printed.contains("Ink frame")
+            || parser.screen().hide_cursor()
+        {
+            return Err(
+                format!("missing handover, redraw or cursor restoration: {output:?}").into(),
+            );
+        }
+    } else if handover {
         let Some((_, after)) = output.rsplit_once("CHILD_OUTPUT") else {
             return Err(format!("missing child output: {output:?}").into());
         };
@@ -489,21 +578,24 @@ fn assert_output(case: Case, output: &[u8]) -> Result {
         Case::Pipe => "ready-stdin-not-tty",
         _ => "exited",
     };
-    if !output.contains(marker) || !output.contains("exited") {
+    if !printed.contains(marker) || !printed.contains("exited") {
         return Err(format!("missing {marker:?} or exited in {output:?}").into());
     }
     if matches!(case, Case::Raw | Case::Thrown | Case::ThrownCoreFirst)
-        && !output.contains("termios-restored")
+        && !printed.contains("input-mode-restored")
     {
-        return Err("missing termios restoration marker".into());
+        return Err("missing input mode restoration marker".into());
     }
     if matches!(case, Case::Thrown | Case::ThrownCoreFirst) {
-        let mut parser = vt100::Parser::new(24, 100, 1000);
-        parser.process(output.as_bytes());
-        if !parser.screen().contents().contains("ERROR") || parser.screen().hide_cursor() {
+        let shown = if cfg!(windows) {
+            printed.to_owned()
+        } else {
+            parser.screen().contents()
+        };
+        if !shown.contains("ERROR") || parser.screen().hide_cursor() {
             return Err(format!("missing overview or cursor restoration: {output:?}").into());
         }
-        if output.contains("panicked at") {
+        if printed.contains("panicked at") {
             return Err("std panic output escaped the boundary".into());
         }
     }
@@ -511,6 +603,7 @@ fn assert_output(case: Case, output: &[u8]) -> Result {
 }
 
 fn run_pty(case: Case, id: &str) -> Result {
+    #[cfg(unix)]
     if case == Case::JobControl
         && !std::env::var_os("PATH")
             .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join("bash").is_file()))
@@ -519,6 +612,7 @@ fn run_pty(case: Case, id: &str) -> Result {
         return Ok(());
     }
     let executable = std::env::current_exe()?;
+    #[cfg(unix)]
     let args = [
         OsStr::new("--norc"),
         OsStr::new("--noprofile"),
@@ -527,17 +621,21 @@ fn run_pty(case: Case, id: &str) -> Result {
         OsStr::new("\"$0\"; fg"),
         executable.as_os_str(),
     ];
-    let mut session = Session::spawn(
-        if case == Case::JobControl {
-            OsStr::new("bash")
-        } else {
-            executable.as_os_str()
-        },
-        if case == Case::JobControl { &args } else { &[] },
-        &[(FIXTURE, id)],
-        24,
-        100,
-    )?;
+    #[cfg(unix)]
+    let (program, args): (&OsStr, &[&OsStr]) = if case == Case::JobControl {
+        (OsStr::new("bash"), &args)
+    } else {
+        (executable.as_os_str(), &[])
+    };
+    #[cfg(windows)]
+    let (program, args): (&OsStr, &[&OsStr]) = (executable.as_os_str(), &[]);
+    let (rows, cols) = if case == Case::FullHeightRerender {
+        (6, 40)
+    } else {
+        (24, 100)
+    };
+    let mut session = Session::spawn(program, args, &[(FIXTURE, id)], rows, cols)?;
+    #[cfg(unix)]
     if matches!(case, Case::JobControl | Case::Orphan) {
         session.wait_for(|output| String::from_utf8_lossy(output).contains(READY))?;
         let start = session.output().len();
@@ -557,7 +655,7 @@ fn run_pty(case: Case, id: &str) -> Result {
     if matches!(case, Case::Alive | Case::CtrlC) {
         let mut ready_at = None;
         session.wait_for(|output| {
-            if ready_at.is_none() && String::from_utf8_lossy(output).contains(READY) {
+            if ready_at.is_none() && printed(output, rows, cols).contains(READY) {
                 ready_at = Some(Instant::now());
             }
             ready_at.is_some_and(|ready| {
@@ -568,11 +666,12 @@ fn run_pty(case: Case, id: &str) -> Result {
     }
     let status = session.wait_exit()?;
     let output = session.output();
+    let printed = printed(output, rows, cols);
     if case == Case::NestedPanic {
         let mut parser = vt100::Parser::new(24, 100, 0);
         parser.process(output);
         if status.success()
-            || !String::from_utf8_lossy(output).contains("nested destructor failure")
+            || !printed.contains("nested destructor failure")
             || parser.screen().hide_cursor()
         {
             return Err(format!(
@@ -590,7 +689,25 @@ fn run_pty(case: Case, id: &str) -> Result {
         )
         .into());
     }
-    assert_output(case, output)
+    if case == Case::FullHeightRerender {
+        let mut parser = vt100::Parser::new(rows, cols, 1000);
+        parser.process(output);
+        let contents = contents_with_scrollback(&mut parser);
+        let bottom = format!(
+            "#450 bottom{}",
+            "8".repeat(usize::from(cols) - "#450 bottom".len())
+        );
+        if contents.matches("frame 8").count() != 1
+            || contents.matches("#450 top").count() != 1
+            || contents.matches("#450 bottom").count() != 1
+            || contents.matches(&bottom).count() != 1
+            || (0..8).any(|frame| contents.contains(&format!("frame {frame}")))
+        {
+            return Err(format!("stale or missing full-height frame: {contents:?}").into());
+        }
+        return Ok(());
+    }
+    assert_output(case, output, &printed)
 }
 
 fn run_pipe(case: Case, id: &str) -> Result {
@@ -624,7 +741,7 @@ fn run_pipe(case: Case, id: &str) -> Result {
                 }
             }
             if is_stdout {
-                assert_output(case, &output)?;
+                assert_output(case, &output, &String::from_utf8_lossy(&output))?;
             }
         }
         if !child.wait()?.success() {

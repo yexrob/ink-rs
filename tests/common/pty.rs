@@ -33,12 +33,14 @@ pub fn collect(mut reader: impl Read + Send + 'static) -> mpsc::Receiver<io::Res
 }
 
 pub struct Session {
-    _master: Box<dyn MasterPty + Send>,
+    master: Option<Box<dyn MasterPty + Send>>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn Child + Send + Sync>,
     receiver: mpsc::Receiver<io::Result<Vec<u8>>>,
     output: Vec<u8>,
     status: Option<ExitStatus>,
+    #[cfg(windows)]
+    cursor_reported: bool,
     closed: bool,
     deadline: Instant,
 }
@@ -76,12 +78,14 @@ impl Session {
             .map_err(io::Error::other)?;
         drop(pair.slave);
         Ok(Self {
-            _master: pair.master,
+            master: Some(pair.master),
             writer,
             child,
             receiver: collect(reader),
             output: Vec::new(),
             status: None,
+            #[cfg(windows)]
+            cursor_reported: false,
             closed: false,
             deadline: Instant::now() + TIMEOUT,
         })
@@ -96,10 +100,12 @@ impl Session {
         self.writer.flush()
     }
 
-    // TIOCSWINSZ sends SIGWINCH to the foreground process group.
+    // Unix sends SIGWINCH; Windows resizes ConPTY and the driver polls its size.
     #[allow(dead_code)]
     pub fn resize(&self, rows: u16, cols: u16) -> io::Result<()> {
-        self._master
+        self.master
+            .as_ref()
+            .ok_or_else(|| io::Error::other("PTY is closed"))?
             .resize(PtySize {
                 rows,
                 cols,
@@ -113,6 +119,13 @@ impl Session {
         if self.status.is_none() {
             self.status = self.child.try_wait()?;
         }
+        // ConPTY's output pipe stays open until ClosePseudoConsole. The reader
+        // thread keeps draining while dropping the last console owner blocks.
+        // Finish the cursor handshake even if the child has exited.
+        #[cfg(windows)]
+        if self.status.is_some() && self.cursor_reported {
+            self.master.take();
+        }
         Ok(self.status.is_none())
     }
 
@@ -124,9 +137,30 @@ impl Session {
             ));
         }
         match self.receiver.recv_timeout(Duration::from_millis(10)) {
-            Ok(Ok(bytes)) => self.output.extend(bytes),
+            Ok(Ok(bytes)) => {
+                #[cfg(windows)]
+                let start = self.output.len().saturating_sub(3);
+                self.output.extend(bytes);
+                #[cfg(windows)]
+                {
+                    // Include the previous suffix so a split ESC[6n is answered.
+                    let requests = self.output[start..]
+                        .windows(4)
+                        .filter(|bytes| *bytes == b"\x1b[6n")
+                        .count();
+                    for _ in 0..requests {
+                        self.send(b"\x1b[1;1R").map_err(|error| error.to_string())?;
+                        self.cursor_reported = true;
+                    }
+                }
+            }
             // Linux PTY masters report EIO after their last slave closes.
             Ok(Err(error)) if cfg!(target_os = "linux") && error.raw_os_error() == Some(5) => {
+                self.closed = true;
+            }
+            // Windows pipes can report ERROR_BROKEN_PIPE instead of EOF.
+            #[cfg(windows)]
+            Ok(Err(error)) if error.raw_os_error() == Some(109) => {
                 self.closed = true;
             }
             Ok(Err(error)) => return Err(error.to_string()),
@@ -162,6 +196,37 @@ impl Session {
             self.read()?;
         }
     }
+}
+
+// What a PTY child printed. A Unix PTY carries the child's bytes; ConPTY
+// carries conhost's repaint, which can split text runs, so read its screen
+// and history instead.
+#[allow(dead_code)]
+pub fn printed(output: &[u8], rows: u16, cols: u16) -> String {
+    if cfg!(windows) {
+        let mut parser = vt100::Parser::new(rows, cols, 1000);
+        parser.process(output);
+        contents_with_scrollback(&mut parser)
+    } else {
+        String::from_utf8_lossy(output).into_owned()
+    }
+}
+
+// Collect each history row once, then the visible screen, without overlapping
+// scrollback viewports duplicating markers.
+#[allow(dead_code)]
+pub fn contents_with_scrollback(parser: &mut vt100::Parser) -> String {
+    parser.screen_mut().set_scrollback(usize::MAX);
+    let history = parser.screen().scrollback();
+    let (_, cols) = parser.screen().size();
+    let mut rows = Vec::new();
+    for offset in (1..=history).rev() {
+        parser.screen_mut().set_scrollback(offset);
+        rows.push(parser.screen().rows(0, cols).next().unwrap());
+    }
+    parser.screen_mut().set_scrollback(0);
+    rows.extend(parser.screen().rows(0, cols));
+    rows.join("\n")
 }
 
 impl Drop for Session {

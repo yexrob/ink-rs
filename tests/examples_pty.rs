@@ -109,7 +109,7 @@ fn run_pty(case: Case, id: &str) -> Result {
         env.push(("EDITOR", editor));
     }
     let mut session = Session::spawn(executable.as_os_str(), &[], &env, 24, 100)?;
-    let mut parser = vt100::Parser::new(24, 100, 0);
+    let mut parser = vt100::Parser::new(24, 100, 1000);
     let mut consumed = 0;
     match case {
         #[cfg(feature = "tokio")]
@@ -137,14 +137,18 @@ fn run_pty(case: Case, id: &str) -> Result {
         }
         Case::Suspend(editor, status) => {
             wait_screen(&mut session, &mut parser, &mut consumed, &["ready"])?;
+            #[cfg(unix)]
             let start = session.output().len();
             session.send(b"e")?;
             wait_screen(&mut session, &mut parser, &mut consumed, &[status])?;
-            if editor.starts_with("printf ")
-                && !String::from_utf8_lossy(&session.output()[start..])
-                    .contains("editor-command-ran")
-            {
-                return Err("missing editor output".into());
+            if editor.starts_with("printf ") {
+                #[cfg(unix)]
+                let contents = String::from_utf8_lossy(&session.output()[start..]);
+                #[cfg(windows)]
+                let contents = session::contents_with_scrollback(&mut parser);
+                if !contents.contains("editor-command-ran") {
+                    return Err("missing editor output".into());
+                }
             }
             session.send(b"+")?;
             wait_screen(
@@ -172,7 +176,7 @@ fn run_pty(case: Case, id: &str) -> Result {
 }
 
 // render.tsx:249. Replay synchronized frames because cell diffs split the text.
-#[cfg(feature = "tokio")]
+#[cfg(all(feature = "tokio", unix))]
 fn check_jest_frames(output: &[u8]) -> Result {
     let mut parser = vt100::Parser::new(24, 100, 1000);
     let mut total_frame = None;
@@ -209,6 +213,26 @@ fn check_jest_frames(output: &[u8]) -> Result {
         )
         .into()),
     }
+}
+
+// Conhost drops synchronized-output boundaries, so only the completed screen
+// and scrollback are observable here, not Ink's frame completion order.
+#[cfg(all(feature = "tokio", windows))]
+fn check_jest_frames(output: &[u8]) -> Result {
+    let mut parser = vt100::Parser::new(24, 100, 1000);
+    parser.process(output);
+    let contents = session::contents_with_scrollback(&mut parser);
+    if !contents.contains("10 total")
+        || !contents.contains("Ran all test suites.")
+        || contents.matches("PASS").count() + contents.matches("FAIL").count() != 10
+        || parser.screen().hide_cursor()
+    {
+        return Err(format!(
+            "missing Jest results, completion or cursor restoration: {contents:?}"
+        )
+        .into());
+    }
+    Ok(())
 }
 
 fn main() {

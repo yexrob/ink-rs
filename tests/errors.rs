@@ -24,7 +24,7 @@ fn catch_and_display_error() {
             "",
             "  ERROR  Oh no",
             "",
-            " tests/errors.rs:16:9",
+            &format!(" {}:16:9", file!()),
             "",
             " 13:     let terminal = TestTerminal::new(100, 24);",
             " 14:",

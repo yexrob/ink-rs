@@ -1,6 +1,7 @@
 // Ink examples/suspend-terminal.
 
 use std::ffi::OsStr;
+#[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 use std::process::{Command, Stdio};
 
@@ -15,18 +16,19 @@ fn run_child(command: &str, args: &[&OsStr]) -> Result<(), String> {
         .status()
         .map_err(|error| error.to_string())?;
     if status.success() {
-        Ok(())
-    } else if let Some(signal) = status.signal() {
+        return Ok(());
+    }
+    #[cfg(unix)]
+    if let Some(signal) = status.signal() {
         let name = signal_hook::low_level::signal_name(signal)
             .map(str::to_owned)
             .unwrap_or_else(|| signal.to_string());
-        Err(format!("Child process terminated by signal {name}"))
-    } else {
-        Err(format!(
-            "Child process exited with code {}",
-            status.code().expect("child exit code")
-        ))
+        return Err(format!("Child process terminated by signal {name}"));
     }
+    Err(format!(
+        "Child process exited with code {}",
+        status.code().expect("child exit code")
+    ))
 }
 
 pub fn app() -> Element {
