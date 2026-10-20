@@ -13,6 +13,8 @@ use process::{ProcessTerminal, Registration};
 mod environment;
 mod process;
 mod stdin;
+#[cfg(feature = "tokio")]
+pub mod tokio;
 
 #[cfg(test)]
 mod tests;
@@ -33,6 +35,13 @@ pub(super) trait Post: Send + Sync + 'static {
 }
 
 impl Post for mpsc::Sender<Message> {
+    fn post(&self, message: Message) {
+        let _ = self.send(message);
+    }
+}
+
+#[cfg(feature = "tokio")]
+impl Post for ::tokio::sync::mpsc::UnboundedSender<Message> {
     fn post(&self, message: Message) {
         let _ = self.send(message);
     }

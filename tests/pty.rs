@@ -45,9 +45,25 @@ enum Case {
     Suspend,
     JobControl,
     Orphan,
+    #[cfg(feature = "tokio")]
+    TokioFinish,
+    #[cfg(feature = "tokio")]
+    TokioSuspend,
 }
 
 const CASES: &[(Case, &str, &str)] = &[
+    #[cfg(feature = "tokio")]
+    (
+        Case::TokioFinish,
+        "tokio-finish",
+        "tokio driver ends after its last use_future task",
+    ),
+    #[cfg(feature = "tokio")]
+    (
+        Case::TokioSuspend,
+        "tokio-suspend",
+        "tokio driver hands the terminal over while tasks keep running",
+    ),
     (
         Case::Suspend,
         "suspend",
@@ -122,6 +138,43 @@ const CASES: &[(Case, &str, &str)] = &[
         "destructor panic restores before abort",
     ),
 ];
+
+#[cfg(feature = "tokio")]
+fn future_finish(cx: &mut Scope, _: &()) -> Element {
+    let label = cx.use_state(|| "waiting");
+    cx.use_future((), move || async move {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        label.set("task done");
+    });
+    Text::new(label.get()).into()
+}
+
+#[cfg(feature = "tokio")]
+fn future_suspend(cx: &mut Scope, _: &()) -> Element {
+    cx.use_input(true, |_, _| {});
+    let handle = cx.use_app();
+    cx.use_future((), move || async move {
+        let (send, receive) = mpsc::channel();
+        let (returned, done) = tokio::sync::oneshot::channel();
+        let exit = handle.clone();
+        tokio::task::spawn_local(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            send.send(()).unwrap();
+            done.await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            exit.exit();
+        });
+        handle
+            .suspend_terminal(move || {
+                print!("CHILD_OUTPUT");
+                io::stdout().flush().unwrap();
+                receive.recv().unwrap();
+                returned.send(()).unwrap();
+            })
+            .unwrap();
+    });
+    Text::new("Ink frame").into()
+}
 
 fn suspended_child(cx: &mut Scope, _: &()) -> Element {
     cx.use_input(true, |_, _| {});
@@ -306,6 +359,24 @@ fn nested_panic(cx: &mut Scope, fail: &bool) -> Element {
 }
 
 fn fixture(case: Case) -> Result {
+    #[cfg(feature = "tokio")]
+    if matches!(case, Case::TokioFinish | Case::TokioSuspend) {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build_local(Default::default())?;
+        runtime.block_on(async {
+            let element = if case == Case::TokioFinish {
+                component(future_finish, ())
+            } else {
+                component(future_suspend, ())
+            };
+            ink_rs::tokio::render(element, Options::default())
+                .wait_until_exit()
+                .await
+        })?;
+        println!("exited");
+        return Ok(());
+    }
     if case == Case::ThrownCoreFirst {
         let terminal = ink_rs::testing::TestTerminal::new(100, 24);
         ink_rs::testing::mount(
@@ -393,7 +464,10 @@ fn fixture(case: Case) -> Result {
 
 fn assert_output(case: Case, output: &[u8]) -> Result {
     let output = String::from_utf8_lossy(output);
-    if case == Case::Suspend {
+    let handover = case == Case::Suspend;
+    #[cfg(feature = "tokio")]
+    let handover = handover || case == Case::TokioSuspend;
+    if handover {
         let Some((_, after)) = output.rsplit_once("CHILD_OUTPUT") else {
             return Err(format!("missing child output: {output:?}").into());
         };
@@ -407,6 +481,8 @@ fn assert_output(case: Case, output: &[u8]) -> Result {
         }
     }
     let marker = match case {
+        #[cfg(feature = "tokio")]
+        Case::TokioFinish => "task done",
         Case::Error | Case::RawError | Case::Thrown | Case::ThrownCoreFirst => "errored",
         Case::Value => "result:hello from ink",
         Case::Object => "result:hello from ink object",

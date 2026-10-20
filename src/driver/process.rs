@@ -132,7 +132,7 @@ impl ProcessTerminal {
         }
         Registration {
             entry,
-            suspended: None,
+            suspended: Vec::new(),
         }
     }
 }
@@ -252,7 +252,7 @@ fn registry() -> &'static Registry {
 
 pub(super) struct Registration {
     entry: Arc<Entry>,
-    suspended: Option<Arc<Entry>>,
+    suspended: Vec<Arc<Entry>>,
 }
 
 impl Registration {
@@ -270,13 +270,14 @@ impl Registration {
 
     pub(super) fn enter_loop(&mut self) {
         let entries = registry().entries.lock().unwrap();
-        // A nested wait suspends the caller's loop. Treat it as outside the
-        // loop rather than waiting for cleanups that cannot run on this thread.
+        // A sync wait blocks every loop on this thread, including concurrent
+        // Tokio apps. Their cleanups cannot run until this registration drops.
         self.suspended = entries
             .iter()
-            .find(|entry| entry.owner == self.entry.owner && entry.in_loop.load(Ordering::SeqCst))
-            .cloned();
-        if let Some(entry) = &self.suspended {
+            .filter(|entry| entry.owner == self.entry.owner && entry.in_loop.load(Ordering::SeqCst))
+            .cloned()
+            .collect();
+        for entry in &self.suspended {
             entry.in_loop.store(false, Ordering::SeqCst);
         }
         self.entry.in_loop.store(true, Ordering::SeqCst);
@@ -289,7 +290,7 @@ impl Drop for Registration {
         self.entry.restore(false);
         let mut entries = registry().entries.lock().unwrap();
         entries.retain(|entry| !Arc::ptr_eq(entry, &self.entry));
-        if let Some(entry) = &self.suspended {
+        for entry in &self.suspended {
             entry.in_loop.store(true, Ordering::SeqCst);
         }
         if entries.is_empty() {

@@ -15,6 +15,13 @@
 //! and a clock advanced by the test. [`testing::TestApp::input`] feeds bytes to
 //! active [`Scope::use_input`], [`Scope::use_paste`] and [`Scope::use_focus`] hooks.
 //!
+//! On Unix, `render` mounts on process stdout and its `wait_until_exit` blocks
+//! the calling thread. The default `tokio` feature adds `ink_rs::tokio` and
+//! `Scope::use_future` for tasks on a local runtime or `tokio::task::LocalSet`.
+//! Tasks can write `State` on the UI thread; `use_future` aborts them on
+//! dependency changes and unmount, and keeps the app alive until they finish.
+//! A sync `ink_rs::render(..).wait_until_exit()` blocks every task on its thread.
+//!
 //! See `docs/design.md` for the architecture and the milestone plan.
 
 mod app;
@@ -43,6 +50,8 @@ pub use app::Options;
 pub use border::{BorderStyle, BoxChars};
 pub use color::{Color, ColorLevel, ParseColorError};
 pub use components::{Newline, Spacer, Static, Text, Transform, View};
+#[cfg(all(unix, feature = "tokio"))]
+pub use driver::tokio;
 #[cfg(unix)]
 pub use driver::{Instance, render};
 pub use element::{Element, Key, TextChild};
