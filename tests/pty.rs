@@ -1,6 +1,6 @@
 //! Ink 8.0.0 test/exit.tsx, test/hooks.tsx and test/render.tsx, commit 26d2c3f.
 //! One executable serves as harness and fixture so Cargo builds both together.
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 #[cfg(target_os = "macos")]
 use std::os::fd::AsRawFd;
 use std::process::{Command, Stdio};
@@ -9,8 +9,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use ink_rs::{AnimationOptions, Element, Error, Options, Scope, Text, component, render};
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+#[path = "common/pty.rs"]
+mod session;
 use rustix::termios::{Termios, tcgetattr};
+use session::{Session, collect};
 
 const FIXTURE: &str = "INK_RS_PTY_FIXTURE";
 const READY: &str = "__READY__";
@@ -325,29 +327,6 @@ fn fixture(case: Case) -> Result {
     Ok(())
 }
 
-fn collect(mut reader: impl Read + Send + 'static) -> mpsc::Receiver<io::Result<Vec<u8>>> {
-    let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || {
-        let mut buffer = [0; 4096];
-        loop {
-            match reader.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(n) => {
-                    if sender.send(Ok(buffer[..n].to_vec())).is_err() {
-                        break;
-                    }
-                }
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) => {
-                    let _ = sender.send(Err(error));
-                    break;
-                }
-            }
-        }
-    });
-    receiver
-}
-
 fn assert_output(case: Case, output: &[u8]) -> Result {
     let output = String::from_utf8_lossy(output);
     let marker = match case {
@@ -379,99 +358,50 @@ fn assert_output(case: Case, output: &[u8]) -> Result {
 }
 
 fn run_pty(case: Case, id: &str) -> Result {
-    let pair = native_pty_system().openpty(PtySize {
-        rows: 24,
-        cols: 100,
-        pixel_width: 0,
-        pixel_height: 0,
-    })?;
-    let mut command = CommandBuilder::new(std::env::current_exe()?);
-    command.env(FIXTURE, id);
-    command.env("TERM", "xterm-256color");
-    command.env("RUST_LIB_BACKTRACE", "0");
-    command.env_remove("CI");
-    command.env_remove("CONTINUOUS_INTEGRATION");
-    let reader = pair.master.try_clone_reader()?;
-    let mut writer = pair.master.take_writer()?;
-    let mut child = pair.slave.spawn_command(command)?;
-    drop(pair.slave);
-    let receiver = collect(reader);
-    let result = (|| -> Result {
-        let deadline = Instant::now() + TIMEOUT;
-        let mut output = Vec::new();
+    let mut session = Session::spawn(
+        std::env::current_exe()?.as_os_str(),
+        &[],
+        &[(FIXTURE, id)],
+        24,
+        100,
+    )?;
+    if matches!(case, Case::Alive | Case::CtrlC) {
         let mut ready_at = None;
-        let mut sent = false;
-        let mut status = None;
-        let mut closed = false;
-        loop {
-            if Instant::now() >= deadline {
-                return Err(
-                    format!("timed out; output: {:?}", String::from_utf8_lossy(&output)).into(),
-                );
+        session.wait_for(|output| {
+            if ready_at.is_none() && String::from_utf8_lossy(output).contains(READY) {
+                ready_at = Some(Instant::now());
             }
-            match receiver.recv_timeout(Duration::from_millis(10)) {
-                Ok(Ok(bytes)) => output.extend(bytes),
-                // Linux PTY masters report EIO after their last slave closes.
-                Ok(Err(error)) if cfg!(target_os = "linux") && error.raw_os_error() == Some(5) => {
-                    closed = true
-                }
-                Ok(Err(error)) => return Err(error.into()),
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    closed = true;
-                    thread::sleep(Duration::from_millis(10));
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-            }
-            if status.is_none() {
-                status = child.try_wait()?;
-            }
-            if matches!(case, Case::Alive | Case::CtrlC) && !sent {
-                if ready_at.is_none() && String::from_utf8_lossy(&output).contains(READY) {
-                    ready_at = Some(Instant::now());
-                }
-                if status.is_some() {
-                    return Err("child exited before input".into());
-                }
-                if let Some(ready) = ready_at
-                    && (case == Case::CtrlC || ready.elapsed() >= Duration::from_millis(500))
-                {
-                    writer.write_all(if case == Case::CtrlC { b"\x03" } else { b"q" })?;
-                    writer.flush()?;
-                    sent = true;
-                }
-            }
-            if closed && let Some(status) = &status {
-                if case == Case::NestedPanic {
-                    let output = String::from_utf8_lossy(&output);
-                    let mut parser = vt100::Parser::new(24, 100, 0);
-                    parser.process(output.as_bytes());
-                    if status.success()
-                        || !output.contains("nested destructor failure")
-                        || parser.screen().hide_cursor()
-                    {
-                        return Err(format!(
-                            "nested panic failed to restore and abort: {output:?}"
-                        )
-                        .into());
-                    }
-                    return Ok(());
-                }
-                if !status.success() {
-                    return Err(format!(
-                        "child status {status:?}; output: {:?}",
-                        String::from_utf8_lossy(&output)
-                    )
-                    .into());
-                }
-                return assert_output(case, &output);
-            }
-        }
-    })();
-    if result.is_err() {
-        let _ = child.kill();
-        let _ = child.wait();
+            ready_at.is_some_and(|ready| {
+                case == Case::CtrlC || ready.elapsed() >= Duration::from_millis(500)
+            })
+        })?;
+        session.send(if case == Case::CtrlC { b"\x03" } else { b"q" })?;
     }
-    result
+    let status = session.wait_exit()?;
+    let output = session.output();
+    if case == Case::NestedPanic {
+        let mut parser = vt100::Parser::new(24, 100, 0);
+        parser.process(output);
+        if status.success()
+            || !String::from_utf8_lossy(output).contains("nested destructor failure")
+            || parser.screen().hide_cursor()
+        {
+            return Err(format!(
+                "nested panic failed to restore and abort: {:?}",
+                String::from_utf8_lossy(output)
+            )
+            .into());
+        }
+        return Ok(());
+    }
+    if !status.success() {
+        return Err(format!(
+            "child status {status:?}; output: {:?}",
+            String::from_utf8_lossy(output)
+        )
+        .into());
+    }
+    assert_output(case, output)
 }
 
 fn run_pipe(case: Case, id: &str) -> Result {
