@@ -13,7 +13,7 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
  ───────────────────── 核心（步进式，单线程）─────────────────────
  runtime    组件实例树、hooks、按 key 比对、调度、effect、context、焦点
               │ host 变更：创建 / 改属性 / 插入 / 删除
- host       TaffyTree<HostNode>，跨帧常驻
+ host       自有节点树，实现 taffy 的底层 trait，跨帧常驻
  layout     taffy 布局  ←  text：解析、宽度、换行、测量
  paint      host 树 + 布局 → Frame
  output     Frame 差分 → 字节
@@ -28,7 +28,7 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
 | components / hooks | builder 和 `use_*` | `components/`、`hooks/` |
 | driver | 拥有循环和睡眠，把事件交给核心 | `ink.tsx` 的事件接线 |
 | runtime | 组件实例树、按调用顺序存放的 hooks、按 key 比对、调度、effect | `reconciler.ts` |
-| host | 节点存储：View / Text / Static / Transform。用 `TaffyTree<HostNode>`，跨帧常驻。Text 里嵌套的 Text、Transform、组件构成行内树，挂在 Text 节点上，taffy 看到的是一个叶子 | `dom.ts` |
+| host | 节点存储：View / Text / Static / Transform。自有节点树，实现 taffy 的底层布局 trait，跨帧常驻。Text 里嵌套的 Text、Transform、组件构成行内树，挂在 Text 节点上，taffy 看到的是一个叶子 | `dom.ts` |
 | layout + text | taffy 布局；文本解析、测量、换行、截断、宽字符 | `styles.ts`、`wrap-text.ts` … |
 | paint | 纯函数：节点树 → `Frame`（网格、新增的 Static 行、光标位置），含边框、背景、裁剪、Transform。每帧整帧重画 | `render-node-to-output.ts`、`output.ts` |
 | output | 非全屏 / 全屏两种模式：单元格 diff、Static、光标、同步输出、恢复终端 | `log-update.ts`、`ink.tsx` |
@@ -107,11 +107,11 @@ M0 的 API（`src/lib.rs`）：
 
 ## 布局与文本
 
-- **布局**用 taffy 做 flexbox，开放 Ink 用到的属性。host 树就是 taffy 树，跨帧保留，每帧重算变化的节点。与 Yoga 的差异在样式映射时抹平：根节点用 Yoga 的默认值；没设最小尺寸的节点最小尺寸为 0（Yoga 没有 min-content 下限）；文本宽度向上取整；`position: static` 映射成 relative 并忽略 inset。
+- **布局**用 taffy 的 flexbox 算法，开放 Ink 用到的属性。host 树实现 taffy 的底层 trait（不用 `TaffyTree`），跨帧保留，每帧重算变化的节点。与 Yoga 的差异分两处抹平。样式映射：根节点用 Yoga 的默认值；没设最小尺寸的节点最小尺寸为 0（Yoga 没有 min-content 下限）；文本宽度向上取整；`position: static` 映射成 relative 并忽略 inset。布局时由 host 树调整子节点的测量约束和样式：自动尺寸的子项以容器的可用尺寸为上限测量 flex basis（Yoga 的 AtMost，taffy 按 max-content）；设了 aspect ratio 的子项由主轴尺寸推出交叉轴尺寸，不看交叉轴的尺寸和 stretch。有子项按 baseline 对齐时，Yoga 按内容决定行高，这一点不复刻，记在 `ink-tests.md`。
 - **ANSI**：用户传入的字符串在 `Text` 边界解析一次。保留 SGR 和 OSC 8 超链接，去掉其他控制序列与 C0 控制字符（制表符和换行除外），防止外部内容移动光标。超链接以外的 OSC（窗口标题、剪贴板等）在解析时丢掉。超链接记下原始参数和终止符（BEL 或 ST），输出时还原。
 - **样式叠加**：`Text` 的样式按"内层没设的属性由外层补上"叠加到字素上，不复刻 chalk 的字符串包裹。props 里的颜色按 `color_level` 降级（同 chalk）；用户传入的原始 SGR 不降级。
 - **Transform**：把一行序列化成字符串交给用户函数，解析返回值。
-- **断行**同 wrap-ansi：在空格处断行，单词超过行宽时按字素硬断，不去掉首尾空格。不按 UAX #14：一段连续的中日韩文字放得进下一行时，wrap-ansi 把整段移到下一行，UAX #14 在当前行行尾断开，Ink 的测试期望是前者。截断同 cli-truncate，按行进行，省略号取相邻字素的样式，不带超链接。换行与截断模式同 Ink：`Wrap`、`Hard`、`TruncateStart`、`TruncateMiddle`、`TruncateEnd`。
+- **断行**同 wrap-ansi：在空格处断行，单词超过行宽时按字素硬断，不去掉首尾空格。不按 UAX #14：一段连续的中日韩文字放得进下一行时，wrap-ansi 把整段移到下一行，UAX #14 在当前行行尾断开，Ink 的测试期望是前者。截断同 cli-truncate，按行进行：首尾截断时省略号取保留一侧的样式，不带超链接；中间截断和只剩 1 列时省略号不带样式。换行与截断模式同 Ink：`Wrap`、`Hard`、`TruncateStart`、`TruncateMiddle`、`TruncateEnd`。
 - **宽度**按字素簇（unicode-segmentation）计算，规则同 string-width 8.3：零宽字素不占格，emoji 序列和东亚宽字符占 2 格，东亚歧义宽度按 1 格。
 - **测量缓存**存在 Text 节点上，文本或可用宽度变化时失效。不做 Ink 按字符串的全局缓存：那是每帧重新拼字符串的结果，常驻树用不到。
 
