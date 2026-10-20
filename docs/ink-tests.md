@@ -6,7 +6,7 @@
 
 Ink 有 95 个测试文件、1,646 个测试。
 
-- **M0**：40 个文件、755 个测试。移植 617 个，写成 621 个 `#[test]`（`content-offset.tsx` 的一个参数化测试按参数拆成 5 个），上游跳过的 4 个中，3 个标 `#[ignore]`，1 个在 taffy 下通过。未移植 138 个，原因见下表，明细见[下文](#m0-文件中未移植的测试)。
+- **M0**：40 个文件、755 个测试。移植 618 个，写成 622 个 `#[test]`（`content-offset.tsx` 的一个参数化测试按参数拆成 5 个），上游跳过的 4 个中，3 个标 `#[ignore]`，1 个在 taffy 下通过。未移植 137 个，原因见下表，明细见[下文](#m0-文件中未移植的测试)。
 - **其他 55 个文件**（891 个测试）：48 个随 M1–M4 移植，`screen-reader.tsx` 随屏幕阅读器模式延后，6 个不适用。M1 文件中不移植的测试见[下文](#m1-文件中不移植的测试)。
 
 | 未移植原因 | 数量 | 处理 |
@@ -16,7 +16,6 @@ Ink 有 95 个测试文件、1,646 个测试。
 | Static 跨帧、非 TTY / CI、备用屏幕 | 32 | M2 |
 | 输入、raw mode | 6 | M3 |
 | 屏幕阅读器 | 2 | 延后 |
-| 缺 API | 1 | 见[缺 API](#缺-api) |
 | 不适用 | 16 | 不移植 |
 
 ## 按文件
@@ -29,7 +28,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `alternate-screen-example.tsx` | 2 | M4 | 2 | `tests/examples.rs` |
 | `ansi-newlines.tsx` | 9 | M0 | 9 | `tests/ansi_newlines.rs` |
 | `ansi-tokenizer.ts` | 26 | M0 | 26 | `src/text/ansi/tests.rs` |
-| `background.tsx` | 32 | M0 / M1 | 27 | `tests/background.rs` |
+| `background.tsx` | 32 | M0 / M1 | 28 | `tests/background.rs` |
 | `border-backgrounds.tsx` | 5 | M0 | 5 | `tests/border_backgrounds.rs` |
 | `borders.tsx` | 52 | M0 / M1 | 48 | `tests/borders.rs` |
 | `build-output.ts` | 4 | — |  |  |
@@ -128,7 +127,6 @@ Ink 有 95 个测试文件、1,646 个测试。
 ### `background.tsx`
 
 - M1 已移植：`Box preserves child state when adding a background color`、`Box preserves child state when removing a background color`、`Box background updates on rerender`
-- 缺 API：`Mixed text with and without background inheritance`
 - 并发：`Text inherits parent Box background color`、`Nested Box background inheritance`、`Box background with hex color`、`Box background updates on rerender`
 
 ### `borders.tsx`
@@ -362,7 +360,6 @@ Ink 有 95 个测试文件、1,646 个测试。
 - `onRender` / `renderTime`：本阶段不添加，影响 `render-callback.tsx` 和 `render.tsx` 的 `outputs renderTime when onRender is passed`。
 - `waitUntilRenderFlush`：本阶段不添加。测试通过 `TestApp::advance` 驱动截止时间，Terminal 的写入为同步调用，没有 Node 回调或 Promise 屏障。相关测试名称见 M2 清单。
 - `isRawModeSupported`：本阶段不添加 `use_stdin`。stdin 不是 TTY 时，`use_input` 让应用以 `ErrorKind::Unsupported` 退出，组件无法预先判断。影响 `components.tsx` 的 `render different component based on whether stdin is a TTY or not`。
-- `<Text backgroundColor="">`：Ink 用空字符串表示不继承父 `Box` 的背景色。Rust 的 `Text::background_color` 收 `Option<Color>`，`None` 表示继承，没有表达"无背景"的值。影响 `background.tsx` 的 `Mixed text with and without background inheritance`。
 
 ## 与 Ink 测试的差异
 

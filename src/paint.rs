@@ -7,7 +7,7 @@ use crate::text::measure::measure_text;
 use crate::text::styled::{self, CharStyle, StyledChar, StyledLine, StyledText};
 use crate::text::width::{grapheme_width, is_default_ignorable};
 use crate::text::wrap::wrap_text;
-use crate::{ColorLevel, Display, Overflow, Style};
+use crate::{Color, ColorLevel, Display, Overflow, Style};
 
 /// Continuations belong to the preceding glyph, not to an empty string cell.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -386,7 +386,10 @@ fn decoration(
     let top = i32::from(bordered && style.border.top.visible);
     let bottom = i32::from(bordered && style.border.bottom.visible);
     let content_width = (width - left - right).max(0) as usize;
-    if let Some(color) = style.background_color {
+    if let Some(color) = style
+        .background_color
+        .filter(|&color| color != Color::Reset)
+    {
         let background = CharStyle {
             bg: color.at_level(level),
             ..CharStyle::default()

@@ -25,6 +25,10 @@ pub enum Color {
     BrightWhite,
     Ansi256(u8),
     Rgb(u8, u8, u8),
+    /// The terminal's default foreground or background, without adding SGR.
+    /// On a Text's `background_color`, stops the enclosing View's background,
+    /// like Ink's `backgroundColor=""`; an outer Text's styling applies.
+    Reset,
 }
 
 impl Color {
@@ -39,7 +43,7 @@ impl Color {
 
     /// Prop colors follow chalk; embedded SGR bypasses this conversion.
     pub(crate) fn at_level(self, level: ColorLevel) -> Option<Self> {
-        if level == ColorLevel::None {
+        if self == Self::Reset || level == ColorLevel::None {
             return None;
         }
         let color = match (self, level) {
@@ -57,6 +61,7 @@ impl Color {
     pub(crate) fn sgr(self, background: bool) -> String {
         let offset = if background { 10 } else { 0 };
         match self {
+            Self::Reset => (39 + offset).to_string(),
             Self::Ansi256(n) => format!("{};5;{n}", 38 + offset),
             Self::Rgb(r, g, b) => format!("{};2;{r};{g};{b}", 38 + offset),
             _ => {

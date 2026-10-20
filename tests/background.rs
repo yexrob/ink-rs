@@ -137,6 +137,23 @@ fn multiple_text_elements_inherit_same_background() {
 }
 
 #[test]
+fn mixed_text_with_and_without_background_inheritance() {
+    let output = render_truecolor(
+        View::new()
+            .background_color(Color::Green)
+            .align_self(AlignSelf::FlexStart)
+            .child(Text::new("Inherited "))
+            .child(Text::new("No BG ").background_color(Color::Reset))
+            .child(Text::new("Red BG").background_color(Color::Red)),
+        100,
+    );
+    assert_ansi_eq(
+        &output,
+        &styled(&["{bg=green}Inherited {/}No BG {bg=red}Red BG{/}"]),
+    );
+}
+
+#[test]
 fn complex_nested_structure_with_background_inheritance() {
     let output = render_truecolor(
         View::new()
