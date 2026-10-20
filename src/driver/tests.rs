@@ -44,7 +44,8 @@ fn run(ci: &str, tty: bool) -> String {
         Instant::now(),
     );
     let (sender, receiver) = mpsc::channel();
-    let mut registration = super::ProcessTerminal::new(sender.clone()).register(sender.clone());
+    let mut registration =
+        super::ProcessTerminal::new(Arc::new(sender.clone())).register(Arc::new(sender.clone()));
     registration.enter_loop();
     app.queue().set_wake(Arc::new(sender));
     app.render_if_due(Instant::now());
@@ -90,7 +91,8 @@ fn run_loop_exits_while_an_outside_handle_is_retained() {
         Instant::now(),
     );
     let (sender, receiver) = mpsc::channel();
-    let mut registration = super::ProcessTerminal::new(sender.clone()).register(sender.clone());
+    let mut registration =
+        super::ProcessTerminal::new(Arc::new(sender.clone())).register(Arc::new(sender.clone()));
     registration.enter_loop();
     app.queue().set_wake(Arc::new(sender));
     app.render_if_due(Instant::now());
@@ -130,7 +132,8 @@ fn input_eof_allows_natural_end_after_updates() {
         Instant::now(),
     );
     let (sender, receiver) = mpsc::channel();
-    let mut registration = super::ProcessTerminal::new(sender.clone()).register(sender.clone());
+    let mut registration =
+        super::ProcessTerminal::new(Arc::new(sender.clone())).register(Arc::new(sender.clone()));
     registration.enter_loop();
     app.queue().set_wake(Arc::new(sender.clone()));
     app.render_if_due(Instant::now());
@@ -171,7 +174,8 @@ fn adjacent_input_is_batched_without_crossing_other_messages() {
         Instant::now(),
     );
     let (sender, receiver) = mpsc::channel();
-    let mut registration = super::ProcessTerminal::new(sender.clone()).register(sender.clone());
+    let mut registration =
+        super::ProcessTerminal::new(Arc::new(sender.clone())).register(Arc::new(sender.clone()));
     registration.enter_loop();
     app.render_if_due(Instant::now());
     for message in [

@@ -9,7 +9,7 @@ use std::thread::{self, ThreadId};
 use signal_hook::consts::{SIGCONT, SIGHUP, SIGINT, SIGTERM, SIGTSTP, SIGWINCH};
 use signal_hook::iterator::Signals;
 
-use super::{Message, stdin};
+use super::{Message, Post, stdin};
 use crate::terminal::Terminal;
 
 // Release the registry lock before restoration. Lock order is RestoreState ->
@@ -83,7 +83,7 @@ pub(super) struct ProcessTerminal {
 }
 
 impl ProcessTerminal {
-    pub(super) fn new(sender: mpsc::Sender<Message>) -> Self {
+    pub(super) fn new(sender: Arc<dyn Post>) -> Self {
         let failure = Arc::new(Mutex::new(Failure::default()));
         let mut state = RestoreState {
             stdout: None,
@@ -109,7 +109,7 @@ impl ProcessTerminal {
         }
     }
 
-    pub(super) fn register(&self, sender: mpsc::Sender<Message>) -> Registration {
+    pub(super) fn register(&self, sender: Arc<dyn Post>) -> Registration {
         install_panic_hook();
         let signals = install_signals();
         if let Err(error) = signals {
@@ -211,7 +211,7 @@ struct Entry {
     input: Arc<stdin::Target>,
     state: Arc<Mutex<RestoreState>>,
     owner: ThreadId,
-    sender: mpsc::Sender<Message>,
+    sender: Arc<dyn Post>,
     in_loop: AtomicBool,
 }
 
@@ -358,7 +358,7 @@ fn install_signals() -> &'static io::Result<()> {
                                 // A callback has handed over; the render-to-wait
                                 // gap stops without teardown. Neither has a loop.
                                 if entry.in_loop.load(Ordering::SeqCst) {
-                                    let _ = entry.sender.send(Message::Stop(ack.clone()));
+                                    entry.sender.post(Message::Stop(ack.clone()));
                                 }
                             }
                         }
@@ -370,13 +370,13 @@ fn install_signals() -> &'static io::Result<()> {
                     let entries = registry().entries.lock().unwrap();
                     if signal == SIGCONT {
                         for entry in entries.iter() {
-                            let _ = entry.sender.send(Message::Continue);
+                            entry.sender.post(Message::Continue);
                         }
                         continue;
                     }
                     if signal == SIGWINCH {
                         for entry in entries.iter() {
-                            let _ = entry.sender.send(Message::Resize);
+                            entry.sender.post(Message::Resize);
                         }
                         continue;
                     }
@@ -399,7 +399,7 @@ fn install_signals() -> &'static io::Result<()> {
                         terminate(signal);
                     }
                     for entry in entries.iter() {
-                        let _ = entry.sender.send(Message::Signal);
+                        entry.sender.post(Message::Signal);
                     }
                 }
             })?;

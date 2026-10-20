@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{self, Read, Write};
 use std::os::fd::{AsFd, AsRawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, mpsc};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 
 use filedescriptor::{FileDescriptor, POLLIN, poll, pollfd, socketpair};
@@ -11,17 +11,17 @@ use rustix::termios::{
     tcgetattr, tcsetattr,
 };
 
-use super::Message;
 use super::process::Failure;
+use super::{Message, Post};
 
 pub(super) struct Target {
-    pub(super) sender: mpsc::Sender<Message>,
+    pub(super) sender: Arc<dyn Post>,
     pub(super) failure: Arc<Mutex<Failure>>,
     closed: AtomicBool,
 }
 
 impl Target {
-    pub(super) fn new(sender: mpsc::Sender<Message>, failure: Arc<Mutex<Failure>>) -> Self {
+    pub(super) fn new(sender: Arc<dyn Post>, failure: Arc<Mutex<Failure>>) -> Self {
         Self {
             sender,
             failure,
@@ -126,7 +126,7 @@ pub(super) fn acquire(target: &Arc<Target>) -> io::Result<()> {
             return Err(error);
         }
     } else {
-        let _ = target.sender.send(Message::InputStarted);
+        target.sender.post(Message::InputStarted);
     }
     Ok(())
 }
@@ -152,7 +152,7 @@ fn release_inner(target: &Arc<Target>, emergency: bool, close: bool) -> io::Resu
             && route.ended
             && let Some(target) = route.holders.last()
         {
-            let _ = target.sender.send(Message::InputEnded);
+            target.sender.post(Message::InputEnded);
         }
         route.holders.is_empty()
     };
@@ -192,7 +192,7 @@ impl Stdin {
             .spawn(move || read(input, wake_read, route))?;
         routing.ended = false;
         for target in &routing.holders {
-            let _ = target.sender.send(Message::InputStarted);
+            target.sender.post(Message::InputStarted);
         }
         self.reader = Some(Reader { wake, thread });
         Ok(())
@@ -244,7 +244,7 @@ fn read(mut input: File, wake: FileDescriptor, route: Arc<Mutex<Route>>) {
             Ok(Some(n)) if n > 0 => {
                 let routing = route.lock().unwrap();
                 if let Some(target) = routing.holders.last() {
-                    let _ = target.sender.send(Message::Input(bytes[..n].to_vec()));
+                    target.sender.post(Message::Input(bytes[..n].to_vec()));
                 }
             }
             result => {
@@ -254,7 +254,7 @@ fn read(mut input: File, wake: FileDescriptor, route: Arc<Mutex<Route>>) {
                     if let Err(error) = result {
                         target.failure.lock().unwrap().record(error);
                     }
-                    let _ = target.sender.send(Message::InputEnded);
+                    target.sender.post(Message::InputEnded);
                 }
                 return;
             }
@@ -265,11 +265,15 @@ fn read(mut input: File, wake: FileDescriptor, route: Arc<Mutex<Route>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc;
     use std::time::Duration;
 
     fn target() -> (Arc<Target>, mpsc::Receiver<Message>) {
         let (sender, receiver) = mpsc::channel();
-        (Arc::new(Target::new(sender, Arc::default())), receiver)
+        (
+            Arc::new(Target::new(Arc::new(sender), Arc::default())),
+            receiver,
+        )
     }
 
     // Native rules absent from Ink's PTY cases: last-acquired routing,
