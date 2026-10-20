@@ -1,6 +1,6 @@
 //! Ported from Ink test/suspend-terminal.tsx (Ink 8.0.0, commit 26d2c3f).
 //! Not ported: Symbol.asyncDispose (duplicates resume), incremental Static
-//! (duplicates standard), screen reader (M5), debug (no debug mode), and
+//! (duplicates standard), screen reader (deferred), debug (no debug mode), and
 //! handover rollback (terminal calls cannot throw; I/O errors end the app).
 //! The child-process case lives in tests/pty.rs.
 

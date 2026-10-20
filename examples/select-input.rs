@@ -17,7 +17,8 @@ fn select(cx: &mut Scope, _: &()) -> Element {
             }
         });
     });
-    // M5 adds aria list/listitem props and the screen-reader numbered-input branch.
+    // The deferred screen-reader mode would add aria list/listitem props and the
+    // numbered-input branch.
     View::new()
         .flex_direction(FlexDirection::Column)
         .child(Text::new("Select a color:"))

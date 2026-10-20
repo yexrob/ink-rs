@@ -209,7 +209,7 @@ Ink 的测试是规格，分四层：
 - 依赖 tokio 的示例（jest、subprocess-output）在 `Cargo.toml` 中声明 `required-features = ["tokio"]`，`main` 为 `#[tokio::main(flavor = "local")]`，异步工作放在 `use_future` 中。外部数据经 channel 交给组件：subprocess-output 的 `app` 接收 `UnboundedReceiver<Chunk>`，`main` 从子进程读取，测试直接送入数据块。
 - 周期刷新用 `use_animation`，测试用 `advance` 推进。按 tick 计数的状态由 `frame` 推出；其他状态在以 `frame` 为键的 `use_effect` 中每交付一帧走一步，迟到的唤醒跳过的格点不补走。示例在注释中写明用哪一条。`counter.rs` 保留线程加 `AppHandle` 的写法。
 - `useReducer` 改为 `State<T>` 加 `fn reduce`，`Math.random` 改为本地的 xorshift，faker 改为固定数据。
-- aria、select-input 移植画面，屏幕阅读器部分在 M5。`concurrent-suspense`、`suspense`、`use-transition` 依赖 React 并发，`router` 依赖 React Router，不移植。incremental-rendering 去掉 `incrementalRendering` 选项：ink-rs 在各模式下都按格子差分。
+- aria、select-input 移植画面，屏幕阅读器部分随该模式延后。`concurrent-suspense`、`suspense`、`use-transition` 依赖 React 并发，`router` 依赖 React Router，不移植。incremental-rendering 去掉 `incrementalRendering` 选项：ink-rs 在各模式下都按格子差分。
 
 ## 里程碑
 
@@ -220,7 +220,9 @@ Ink 的测试是规格，分四层：
 | M2 | 两种输出模式、Static 跨帧、`max_fps` 节流、光标、非 TTY、外部输出、resize 与 `use_window_size`、终端恢复、同步驱动 | vt100 场景测试 |
 | M3 | 输入、焦点、粘贴、kitty 键盘协议、退出 | PTY 测试 |
 | M4 | 动画、`use_box_metrics`、panic 时的错误界面、挂起恢复、tokio 驱动；移植 Ink 的示例 | 逐个对照示例 |
-| M5 | 宏 DSL、屏幕阅读器模式 | — |
+| M5 | 宏 DSL | 宏与 builder 的渲染结果相同 |
+
+屏幕阅读器模式延后，不排期，涉及的 Ink 测试记在 [ink-tests.md](ink-tests.md)。
 
 ## 平台
 

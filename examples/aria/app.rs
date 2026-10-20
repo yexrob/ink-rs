@@ -15,7 +15,8 @@ fn checkbox(cx: &mut Scope, _: &()) -> Element {
     });
     let instructions = "Press spacebar to toggle the checkbox. \
         This example is best experienced with a screen reader.";
-    // M5 adds checkbox aria-role/state and aria-hidden on the last Text.
+    // The deferred screen-reader mode would add checkbox aria-role/state and
+    // aria-hidden on the last Text.
     View::new()
         .flex_direction(FlexDirection::Column)
         .child(Text::new(instructions))

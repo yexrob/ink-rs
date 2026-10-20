@@ -7,7 +7,7 @@
 Ink 有 95 个测试文件、1,646 个测试。
 
 - **M0**：40 个文件、755 个测试。移植 617 个，写成 621 个 `#[test]`（`content-offset.tsx` 的一个参数化测试按参数拆成 5 个），上游跳过的 4 个中，3 个标 `#[ignore]`，1 个在 taffy 下通过。未移植 138 个，原因见下表，明细见[下文](#m0-文件中未移植的测试)。
-- **其他 55 个文件**（891 个测试）：49 个随 M1–M5 移植，6 个不适用。M1 文件中不移植的测试见[下文](#m1-文件中不移植的测试)。
+- **其他 55 个文件**（891 个测试）：48 个随 M1–M4 移植，`screen-reader.tsx` 随屏幕阅读器模式延后，6 个不适用。M1 文件中不移植的测试见[下文](#m1-文件中不移植的测试)。
 
 | 未移植原因 | 数量 | 处理 |
 |---|---:|---|
@@ -15,7 +15,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | 重渲染、state、effect | 35 | M1 |
 | Static 跨帧、非 TTY / CI、备用屏幕 | 32 | M2 |
 | 输入、raw mode | 6 | M3 |
-| 屏幕阅读器 | 2 | M5 |
+| 屏幕阅读器 | 2 | 延后 |
 | 缺 API | 1 | 见[缺 API](#缺-api) |
 | 不适用 | 16 | 不移植 |
 
@@ -93,7 +93,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `rendering-regressions.tsx` | 2 | M0 | 2 | `tests/rendering_regressions.rs` |
 | `rerender-input.tsx` | 4 | M3 | 3 | `tests/rerender_input.rs` |
 | `sanitize-ansi.ts` | 50 | M0 | 50 | `src/text/sanitize/tests.rs` |
-| `screen-reader.tsx` | 33 | M5 |  |  |
+| `screen-reader.tsx` | 33 | 延后 |  |  |
 | `squash-text-nodes.tsx` | 2 | M0 | 2 | `tests/squash_text_nodes.rs` |
 | `static-abandoned-render.tsx` | 1 | — |  |  |
 | `static-blank-lines.tsx` | 9 | M0 | 9 | `tests/static_blank_lines.rs` |
@@ -162,7 +162,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 ### `flex-direction.tsx`
 
 - M1 已移植：`setting direction to undefined restores the default row layout`
-- M5：`undefined direction uses row separators for screen readers`
+- 延后，屏幕阅读器：`undefined direction uses row separators for screen readers`
 - 并发：`direction row`、`direction column`
 
 ### `flex-wrap.tsx`
@@ -270,7 +270,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 - 不适用，断言 Ink 的整屏清除或逐行擦除次数；ink-rs 使用高度上限和 cell diff：`erase screen`、`erase screen where <Static> exists but interactive part is taller than viewport`、`erase screen where state changes in small viewport`、`#450: full-height rerenders should not repeatedly clear terminal`、`#450: shrink from full-height to rows - 1 should clear exactly once`、`#450: shrink from overflow to rows - 1 should clear exactly once`、`#450: <Static> with shrink from full-height should clear exactly once`、`#450: full-height rerenders with <Static> should not repeatedly clear terminal`。
 - 不适用，Windows 不在 v1 范围内：`#969: full-height rerenders on Windows should clear terminal between frames`。
 - 重复，incrementalRendering 变体；ink-rs 的输出路径是 cell diff：`preserve terminal history when rerendering after clear - incremental`、`full clears do not replay <Static> output into scrollback - incremental`、`growing into an overflowing frame keeps <Static> rows that are still in the viewport - incremental`、`<Static> items added while the frame overflows are written once - incremental`、`alternate screen replays <Static> output when the frame shrinks after overflowing - incremental`、`alternate screen replays <Static> items added while the frame overflows once - incremental`。
-- M5，屏幕阅读器：`preserve terminal history when rerendering after clear - screen-reader`、`clear screen-reader output`、`preserve screen-reader output around stdout writes`、`replace restored screen-reader output after clear and stdout write`、`replace screen-reader output ending in a newline after stdout write`、`preserve static history when screen-reader output resizes`、`rewrap screen-reader output when the terminal gets wider`。
+- 延后，屏幕阅读器：`preserve terminal history when rerendering after clear - screen-reader`、`clear screen-reader output`、`preserve screen-reader output around stdout writes`、`replace restored screen-reader output after clear and stdout write`、`replace screen-reader output ending in a newline after stdout write`、`preserve static history when screen-reader output resizes`、`rewrap screen-reader output when the terminal gets wider`。
 - 不适用，design.md 外部输出不捕获 console：`intercept console methods with omitted patchConsole option`、`intercept console methods with undefined patchConsole option`。
 - 缺 API，本阶段不添加 onRender / renderTime：`outputs renderTime when onRender is passed`。
 - 不适用，Node 写回调、beforeExit 或测试 helper：`waitUntilExit resolves after stdout write callback`、`createDelayedWriteCallbackStdout delays only the first matching chunk`、`waitUntilExit after unmount does not retain a beforeExit listener`、`issue 596: useEffect can run before the first frame write callback`。
@@ -288,7 +288,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 ### `clear-rerender.tsx`
 
 - 重复，incrementalRendering 变体：`rerender restores unchanged content after clear (incremental)`、`state update restores unchanged content after clear (incremental)`、`unmount does not restore cleared content (incremental)`。
-- M5，屏幕阅读器：`rerender restores unchanged content after clear (screen-reader)`、`state update restores unchanged content after clear (screen-reader)`、`unmount does not restore cleared content (screen-reader)`。
+- 延后，屏幕阅读器：`rerender restores unchanged content after clear (screen-reader)`、`state update restores unchanged content after clear (screen-reader)`、`unmount does not restore cleared content (screen-reader)`。
 
 ### `components.tsx`
 
@@ -296,7 +296,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 - 不适用，design.md 外部输出不捕获 console：`primary screen - cleanup console output follows the native console during unmount`、`alternate screen - cleanup console output follows the native console during unmount`。
 - 不适用，Rust 没有 stdout 到实例的全局映射：`render warns when stdout is reused before unmount`。
 - 缺 API：`render different component based on whether stdin is a TTY or not`，见[缺 API](#缺-api)。
-- M5，屏幕阅读器：`unmounting a <Static> ancestor in screen-reader mode does not replay stale output`。
+- 延后，屏幕阅读器：`unmounting a <Static> ancestor in screen-reader mode does not replay stale output`。
 - 重复，React 并发变体：`text - concurrent`、`multiple text nodes - concurrent`、`wrap text - concurrent`、`truncate text in the end - concurrent`、`transform children - concurrent`、`static output - concurrent`、`remeasure text dimensions on text change - concurrent`、`newline - concurrent`、`horizontal spacer - concurrent`、`vertical spacer - concurrent`、`unmounting a <Static> ancestor in concurrent mode does not crash`。
 - 不适用，Rust 在编译期拒绝 View 下的字符串：`fail when text nodes are not within <Text> component`、`fail when text node is not within <Text> component`。
 
@@ -313,7 +313,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 - 缺 API：`onRender observes the committed frame ({"incrementalRendering":false})`，本阶段不添加 onRender 回调。
 - 重复：`onRender observes the committed frame ({"incrementalRendering":true})`，incrementalRendering 变体。
 - 不适用：`onRender observes the committed frame ({"debug":true})`，debug 对应 `testing::render`，没有运行时选项。
-- M5 / 缺 API：`onRender observes the committed frame ({"isScreenReaderEnabled":true})`，屏幕阅读器及 onRender 回调。
+- 延后 / 缺 API：`onRender observes the committed frame ({"isScreenReaderEnabled":true})`，屏幕阅读器及 onRender 回调。
 
 ### `write-synchronized.tsx`
 
@@ -351,7 +351,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 - `errors.tsx`：不适用，Node 的 unhandledRejection 与 JS realm：`does not emit unhandledRejection when render exits with an error and waitUntilExit is unused`、`waitUntilExit preserves a component error from another realm`。
 - `suspend-terminal.tsx`：
   - 重复：`suspendTerminal disposable resumes via Symbol.asyncDispose` 与 `suspendTerminal returns a disposable that resumes on resume()` 相同；`suspendTerminal shows <Static> output once after resume re-enters the alternate screen - incremental` 与 standard 相同。
-  - M5，屏幕阅读器：`suspendTerminal shows <Static> output once after resume re-enters the alternate screen - screen reader`。
+  - 延后，屏幕阅读器：`suspendTerminal shows <Static> output once after resume re-enters the alternate screen - screen reader`。
   - 不适用，没有 debug 模式：`suspendTerminal shows <Static> output once after resume re-enters the alternate screen - debug`。
   - 不适用，Terminal 操作不抛错，I/O 错误结束应用：`suspendTerminal rolls back so a later suspend works if handover throws`。
 - `suspension-handle.tsx`：不适用，没有挂起句柄对象：`an old suspension cannot resume a later suspension (dispose first: false)`、`an old suspension cannot resume a later suspension (dispose first: true)`。
