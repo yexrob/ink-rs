@@ -9,7 +9,7 @@ repository = "https://github.com/yexrob/ink-rs"
 readme = "README.md"
 keywords = ["tui", "terminal", "cli", "ink", "flexbox"]
 categories = ["command-line-interface"]
-exclude = ["/docs", "/CLAUDE.md", "/AGENTS.md", "/.gitignore"]
+exclude = ["/docs", "/scripts", "/CLAUDE.md", "/AGENTS.md", "/.gitignore"]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -33,7 +33,6 @@ signal-hook = { version = "0.3", default-features = false, features = ["iterator
 taffy = { version = "0.15", default-features = false, features = ["std", "taffy_tree", "flexbox"] }
 unicode-normalization = "0.1"
 unicode-segmentation = "1.13"
-unicode-width = "0.2"
 
 [dev-dependencies]
 tokio = { version = "1.54", features = ["rt", "sync", "time", "macros", "test-util"] }

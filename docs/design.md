@@ -124,7 +124,7 @@ M0 的 API（`src/lib.rs`）：
 - **样式叠加**：`Text` 的样式按"内层没设的属性由外层补上"叠加到字素上，不复刻 chalk 的字符串包裹。props 里的颜色按 `color_level` 降级（同 chalk）；用户传入的原始 SGR 不降级。`Color::Reset` 表示终端默认前景色或背景色，不添加 SGR；用于 `Text::background_color` 时阻断 `View` 的背景继承，对应 Ink 的 `backgroundColor=""`，嵌套 Text 保留外层 Text 的样式。
 - **Transform**：把一行序列化成字符串交给用户函数，解析返回值。
 - **断行**同 wrap-ansi：在空格处断行，单词超过行宽时按字素硬断，不去掉首尾空格。`Wrap` 和 `Hard` 对进入换行处理的各行做 NFC 归一化，同 wrap-ansi；放得下的文本和截断模式不做归一化。不按 UAX #14：一段连续的中日韩文字放得进下一行时，wrap-ansi 把整段移到下一行，UAX #14 在当前行行尾断开，Ink 的测试期望是前者。截断同 cli-truncate，按行进行：首尾截断时省略号取保留一侧的样式，不带超链接；中间截断和只剩 1 列时省略号不带样式。换行与截断模式同 Ink：`Wrap`、`Hard`、`TruncateStart`、`TruncateMiddle`、`TruncateEnd`。
-- **宽度**按字素簇（unicode-segmentation）计算，规则同 string-width 8.3：零宽字素不占格，emoji 序列和东亚宽字符占 2 格，东亚歧义宽度按 1 格。公开的 `text_width(&str)` 返回渲染给最宽一行的列数：ANSI 序列不占格，制表符按 8 列展开。`use_cursor` 的列要与渲染一致，`unicode-width` 在 ZWJ emoji 与谚文字母上给出不同的宽度。
+- **宽度**按字素簇（unicode-segmentation）计算，规则同 string-width 8.3：零宽字素不占格，emoji 序列和东亚宽字符占 2 格，东亚歧义宽度按 1 格。属性表由 `scripts/gen_width_data.py` 从 Unicode 18.0.0 数据生成，这是 get-east-asian-width 1.7.0 使用的版本；东亚宽度遵循 get-east-asian-width，W/F 占 2 格，其余占 1 格。Ink 的其他属性来自 Node 的 ICU，因此在旧版 Node 上，Ink 与 ink-rs 对 Unicode 18.0 新字符的处理可能不同。公开的 `text_width(&str)` 返回渲染给最宽一行的列数：ANSI 序列不占格，制表符按 8 列展开。`use_cursor` 的列要与渲染一致，`unicode-width` 在 ZWJ emoji 与谚文字母上给出不同的宽度。
 - **测量缓存**用各节点的 taffy 布局缓存。节点变更时清掉它和祖先的缓存，同 Yoga 的 `markDirty`。不做 Ink 按字符串的全局缓存：那是每帧重新拼字符串的结果，常驻树用不到。
 
 ## 终端输出

@@ -78,7 +78,6 @@ dependencies = [
  "tokio",
  "unicode-normalization",
  "unicode-segmentation",
- "unicode-width",
  "vt100",
 ]
 

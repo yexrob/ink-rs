@@ -1,5 +1,3 @@
-use unicode_width::UnicodeWidthChar;
-
 use super::width_data as data;
 
 fn contains(ranges: &[(u32, u32)], c: char) -> bool {
@@ -17,13 +15,8 @@ fn visible(c: char) -> bool {
 }
 
 fn east_asian_width(c: char) -> usize {
-    // unicode-width adds Khmer shaping and zero-width jamo/marks; string-width
-    // uses EAW here, after its own visibility and Hangul checks.
-    match c {
-        '\u{17a4}' | '\u{17d8}' => 1,
-        _ if contains(data::EAW_WIDE_OVERRIDES, c) => 2,
-        _ => c.width().unwrap_or(0).max(1),
-    }
+    // get-east-asian-width: W/F are wide; ambiguous characters are narrow.
+    if contains(data::WIDE, c) { 2 } else { 1 }
 }
 
 fn leading(c: char) -> bool {
