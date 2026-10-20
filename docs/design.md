@@ -123,7 +123,7 @@ M0 的 API（`src/lib.rs`）：
 - **样式叠加**：`Text` 的样式按"内层没设的属性由外层补上"叠加到字素上，不复刻 chalk 的字符串包裹。props 里的颜色按 `color_level` 降级（同 chalk）；用户传入的原始 SGR 不降级。
 - **Transform**：把一行序列化成字符串交给用户函数，解析返回值。
 - **断行**同 wrap-ansi：在空格处断行，单词超过行宽时按字素硬断，不去掉首尾空格。不按 UAX #14：一段连续的中日韩文字放得进下一行时，wrap-ansi 把整段移到下一行，UAX #14 在当前行行尾断开，Ink 的测试期望是前者。截断同 cli-truncate，按行进行：首尾截断时省略号取保留一侧的样式，不带超链接；中间截断和只剩 1 列时省略号不带样式。换行与截断模式同 Ink：`Wrap`、`Hard`、`TruncateStart`、`TruncateMiddle`、`TruncateEnd`。
-- **宽度**按字素簇（unicode-segmentation）计算，规则同 string-width 8.3：零宽字素不占格，emoji 序列和东亚宽字符占 2 格，东亚歧义宽度按 1 格。
+- **宽度**按字素簇（unicode-segmentation）计算，规则同 string-width 8.3：零宽字素不占格，emoji 序列和东亚宽字符占 2 格，东亚歧义宽度按 1 格。公开的 `text_width(&str)` 返回渲染给最宽一行的列数：ANSI 序列不占格，制表符按 8 列展开。`use_cursor` 的列要与渲染一致，`unicode-width` 在 ZWJ emoji 与谚文字母上给出不同的宽度。
 - **测量缓存**用各节点的 taffy 布局缓存。节点变更时清掉它和祖先的缓存，同 Yoga 的 `markDirty`。不做 Ink 按字符串的全局缓存：那是每帧重新拼字符串的结果，常驻树用不到。
 
 ## 终端输出

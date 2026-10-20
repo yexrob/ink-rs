@@ -58,3 +58,4 @@ pub use style::{
     AlignContent, AlignItems, AlignSelf, Dimension, Display, FlexDirection, FlexWrap, Inset,
     JustifyContent, Overflow, Percent, Position, Style, Styled, TextWrap,
 };
+pub use text::text_width;
