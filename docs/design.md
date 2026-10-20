@@ -43,14 +43,14 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
 - **单元格是内部表示。** text 层把字符串解析成带样式的字素（`StyledChar`），layout、paint、output 处理它。字符串出现在边界：`Text` 的内容、Transform 的参数和返回值、`render_to_string` 的结果、写给终端的字节。
 - **时间由驱动传入。** 核心不读时钟，测试传假时间，不设 Clock 接口。
 - **终端 I/O 经 `Terminal` trait。** 核心写字节、取尺寸、切换模式（raw、备用屏、粘贴、kitty 键盘）；读输入归驱动。crossterm 实现用于生产，内存实现放在 `testing` 模块。
-- **终端恢复用 RAII。** 切换模式时返回 guard；drop、panic hook、终止信号、SIGTSTP/SIGCONT 共用一份恢复逻辑。
+- **终端恢复用 RAII。** app 的 drop、panic hook、终止信号共用 Terminal 的恢复操作与已恢复标记；驱动保存跨线程可达的恢复快照，核心不依赖进程 hook。SIGTSTP/SIGCONT 在 M4 接入。
 
 ## 编程模型
 
 - **组件**是函数 `fn(&mut Scope, &P) -> Element`，要求 `P: PartialEq`。props 没变时跳过整棵子树，等于默认带 memo。`component(f, props)` 生成组件元素，组件身份按 `f` 的类型区分。
 - **比对**同 React：子元素有 key 按 key 对应，没有 key 按位置对应；类型或 key 变了，卸载旧实例、挂载新实例。
 - **hooks** 按调用顺序存放。debug 构建记录每个位置的类型，顺序变化时 panic 并报出组件名。
-- **状态句柄** `State<T>` 是 `Copy` 的分代句柄（runtime id、槽位、代数），读写经线程局部变量找到当前 runtime，放进闭包无需 clone。UI 运行时单线程、`!Send`，在其他线程使用句柄会 panic；其他线程通过 `Send` 的 `AppHandle` 提交更新。一个线程可以同时运行多个实例。组件卸载后，写它的状态被忽略。
+- **状态句柄** `State<T>` 对任意 T 都是 `Copy + Send + Sync` 的分代句柄（runtime id、槽位、代数、所属线程 id），读写经线程局部变量找到当前 runtime，放进闭包无需 clone。UI 运行时单线程、`!Send`，在其他线程使用句柄会 panic；其他线程通过 `Clone + Send + Sync` 的 `AppHandle::update(FnOnce() + Send + 'static)` 提交更新。`Scope::use_app()` 与 `Instance::handle()` 返回句柄，core 不保留计数句柄；保留句柄表示有未结束的工作。核心的 FIFO 队列在下一步执行闭包，状态写入与事件回调相同；卸载关闭队列并丢弃闭包，后续 update 也丢弃。`OutputWriter` 同为 `Copy + Send + Sync`，每次写入检查所属线程，离开 UI 线程时 panic。一个线程可以同时运行多个实例。组件卸载后，写它的状态被忽略。
 - **写状态**：`set` 要求 `T: PartialEq`，值相等时不触发渲染；`update(|v| ..)` 表示明确修改，标脏。渲染过程中写状态在 debug 下 panic，派生值用 `use_memo`。
 - **调度**：一轮事件处理完，所有更新合并成一次提交：重渲染标脏的组件和 props 变化的子树、比对、布局、执行 `use_layout_effect`。提交不节流；paint 和写出受 `max_fps` 限制（Ink 默认 30，窗口 34ms），同 Ink：窗口内第一次立即写出，其余合并到窗口结束时写出。Static 有新条目、resize、卸载、外部写、`clear()` 不等窗口。
 - **空闲**：没有变化时零唤醒、零渲染，由测试保证。
@@ -75,9 +75,13 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
 
 驱动有三个：
 
-- **同步驱动**：UI 线程跑循环，一个线程阻塞读 crossterm 事件。异步结果经 `AppHandle` 送回 UI 线程。
+- **同步驱动**：`render(element, Options) -> Instance` 挂载并运行首步后返回；交互首帧在返回前写出，非交互 live 帧仍在卸载时写出。`rerender`、`clear` 后各运行一步；`unmount(self)` 与 Drop 卸载。`wait_until_exit(self) -> io::Result<()>` 在调用线程排空更新队列、处理消息、用真实时钟步进，并阻塞等待消息或节流截止时间。`Instance` 为 `!Send`。M2 不读 stdin，信号线程以 SIGWINCH 通知尺寸变化；M3 接管 stdin 时重新安排 resize 的来源。异步结果经 `AppHandle` 送回 UI 线程。
 - **tokio 驱动**（feature `tokio`，默认开启）：UI 循环跑在 `LocalSet` 上，`spawn_local` 派生的任务与 UI 同线程，可以写 `State`。任务句柄 drop 时 abort，组件卸载时任务随之取消。输入用 crossterm 的 `event-stream`。`use_future` 属于这个 feature。
 - **测试驱动**（`testing` 模块）：`mount(element, Options, &TestTerminal)` 挂载并运行首步；`advance` 从当前时间开始运行截止时间内的步骤。测试默认 CI=false、Basic 颜色，与 Ink 的测试 helper 一致。`testing::render` 保留不节流的帧记录模式，不添加运行时 debug 选项。
+
+同步循环的自然结束条件集中在一处：步进返回 `None`，且没有外部 `AppHandle`、队列为空，对应 Ink `waitUntilExit` 的 Node `beforeExit`。无句柄的静态应用在首帧后结束；组件 render 中创建后丢弃的句柄不延长生命周期。M3 输入订阅、M4 定时器在此扩展。队列以 mutex 保护提交顺序和句柄计数；提交、最后句柄 drop、UI 状态写入通过核心 `Wake` 接口发消息。同步驱动的 mpsc 保留检查与睡眠之间的消息，不丢唤醒，不定期轮询。`TestApp` 在 rerender / advance 的步骤执行队列，`testing::render` 在 settle 的步骤执行；`render_to_string` 不执行渲染期间提交的更新，卸载丢弃它们。
+
+生产 Terminal 用 `IsTerminal` 查询 stdout，`crossterm::terminal::size()` 失败返回 None。复制 fd 1/2 为 `File`，每个操作调用一次 `write_all` 后 flush，不经过 Rust stdout 的行缓冲。保留首个 I/O 错误并丢弃后续写入；循环在步骤边界结束、卸载并返回该错误，包括 Rust 忽略 SIGPIPE 后的 EPIPE。fd 复制或信号设施初始化失败也经此结果返回，未开启终端模式。
 
 testing 驱动在 M1，同步驱动在 M2，tokio 驱动在 M4。CI 跑一遍 `--no-default-features`，覆盖同步驱动。
 
@@ -131,13 +135,13 @@ M0 的 API（`src/lib.rs`）：
 - **非全屏模式的规则：不写之后够不着的行。** `Static` 写进 scrollback 一次，此后不改。底部可刷新区域的高度上限是屏高，超出部分从顶部裁掉，不清屏、不整屏重绘。持续增长的内容应放进 `Static`。Ink 不设上限：超高帧整帧写出，下一帧用 `CSI 1;1H CSI J` 清掉可见区重写，每个超高帧把顶部的行往 scrollback 推一遍。两者的可见画面相同，ink-rs 的 scrollback 里没有重复的行。
 - **光标停留的位置**同 Ink：帧比屏幕矮时停在帧下一行的行首；帧高达到屏高时停在最后一行，不写末尾的换行。退出时光标移到帧下方，帧高达到屏高时补一个 `\r\n`，让 shell 提示符从新行开始（Ink 不补）。
 - **全屏模式**即备用屏，启动时由选项决定，运行中不切换。帧从屏幕第一行开始。Static 没有 scrollback 可去，同 Ink 保留全部条目，Static 身份改变时清空历史。每帧取历史末尾至多一个屏高的行，放在 live 行之前，交给 Output 裁剪、差分，不整屏清除，不复制全部历史。
-- **resize** 没有精确解法，各家终端重排行为不同。M2 由驱动提交尺寸事件，未知或为 0 的维度按 80 列、24 行回退。交互模式照 Ink `resized`：宽度变小，或高度变小且上一绘制帧声明了光标时，用 `Output::clear` 擦除并忘记上一帧；有光标时从该光标回到帧顶向下擦除，避免碰到帧上方的历史。否则，高度变小且上一帧高度达到新行数时，用 `CSI 1;1H CSI J` 清掉可见区并忘记上一帧；其余情况走 diff。重布局与绘制不等节流窗口，满足待绘制帧，不打开或延长窗口；擦除与绘制合用一次同步输出，帧未变且仍放得下时无写入。非交互模式更新尺寸供后续布局使用，不由 resize 触发擦除或绘制。runtime 改根宽度并安排布局，将调用 `Scope::use_window_size()` 的组件标脏；hook 在 render 读取 `WindowSize { columns, rows }`，不依赖 passive effect 订阅。`testing::render` 与 `render_to_string` 使用 `RenderOptions::columns` 和 24 行。在真实终端上测过之后再调。
+- **resize** 没有精确解法，各家终端重排行为不同。M2 由 signal-hook iterator 线程转发 SIGWINCH，UI 步骤查询 Terminal 尺寸；不调用 crossterm event reader，以免消费宿主程序的 stdin。未知或为 0 的维度按 80 列、24 行回退。交互模式照 Ink `resized`：宽度变小，或高度变小且上一绘制帧声明了光标时，用 `Output::clear` 擦除并忘记上一帧；有光标时从该光标回到帧顶向下擦除，避免碰到帧上方的历史。否则，高度变小且上一帧高度达到新行数时，用 `CSI 1;1H CSI J` 清掉可见区并忘记上一帧；其余情况走 diff。重布局与绘制不等节流窗口，满足待绘制帧，不打开或延长窗口；擦除与绘制合用一次同步输出，帧未变且仍放得下时无写入。非交互模式更新尺寸供后续布局使用，不由 resize 触发擦除或绘制。runtime 改根宽度并安排布局，将调用 `Scope::use_window_size()` 的组件标脏；hook 在 render 读取 `WindowSize { columns, rows }`，不依赖 passive effect 订阅。`testing::render` 与 `render_to_string` 使用 `RenderOptions::columns` 和 24 行。tmux 实测：缩窄时终端重排行，上一帧的长行折成多行，擦除仍按原行数进行，帧顶留下旧内容；Ink 的 `log.clear` 同样按原行数擦除。
 - **光标**对应 Ink 的 `useCursor`：组件在 render 调用 `Scope::use_cursor(Option<CursorPosition>)`，`CursorPosition { x: usize, y: usize }` 是从 0 开始的整数格，原点为 Static 下方 live 帧的左上角；`None` 隐藏。备用屏把 Static 历史放在 live 前交给 Output 时，app 给 y 加上本次重放的 Static 行数；Output 按高度上限减去裁掉的顶部行数，并把越界坐标限制在可见帧内。runtime 使用内部 insertion effect，每次组件渲染后提交；props 相等跳过渲染时保留上次位置。顺序同 React `commitMutationEffectsOnFiber`：本节点的删除清理、子节点、本节点的 insertion effect，最后执行的声明生效；卸载任一调用过此 hook 的组件会清空共享位置，不检查当前所有者。不公开 insertion-effect hook。光标随帧节流；帧和光标未变时不写字节，光标变化时写移动与显隐序列。非交互、`testing::render`、`render_to_string` 忽略光标。同 Ink，首帧起隐藏光标；声明了位置时移过去并显示，下一次写帧前隐藏，输入法候选框靠它定位。
-- **非 TTY / CI**：`interactive` 默认取"不在 CI 且 stdout 是 TTY"，选项可以覆盖，同 Ink。非交互时不刷新画面：提交时写新的 Static 条目，退出时写最后一帧加换行。挂载时读取尺寸，后续由 resize 事件更新，未知维度用 80×24 回退；根宽度为列数。非 TTY 被选项强制为交互模式时不裁剪高度，不视作满屏，不使用同步输出或备用屏。CI 与颜色环境检测归驱动，核心接收解析值。
+- **非 TTY / CI**：`interactive` 默认取"不在 CI 且 stdout 是 TTY"，选项可以覆盖，同 Ink。非交互时不刷新画面：提交时写新的 Static 条目，退出时写最后一帧加换行。挂载时读取尺寸，后续由 resize 事件更新，未知维度用 80×24 回退；根宽度为列数。非 TTY 被选项强制为交互模式时不裁剪高度，不视作满屏，不使用同步输出或备用屏。CI 与颜色环境检测归驱动，在 render 解析一次，核心接收解析值。CI 同 is-in-ci：`CI` 或 `CONTINUOUS_INTEGRATION` 存在且值不是 `0`、`false`。颜色未被选项覆盖时，按 chalk vendored supports-color 的 fd 1 分支顺序：FORCE_COLOR、Azure DevOps、非 TTY、TERM=dumb、CI vendors、TeamCity、COLORTERM=truecolor、具名 TERM、TERM_PROGRAM、TERM patterns、COLORTERM 存在、保底级别。数值 FORCE_COLOR 指定 0–3（大于 3 取 3），false 禁色，true / 空串提供 Basic 保底但允许探测更高级别；其他值同 chalk 按 `parseInt` 取前缀，0 禁色，正数为保底级别，无法解析或为负时仍算强制、保底为 0。颜色分支中的 CI 判断是变量存在，不使用 is-in-ci 的真假规则。0/1/2/3 映射 None/Basic/Ansi256/TrueColor。检测函数接收 env lookup，不修改进程环境。不移植 Windows 分支（v1 平台范围）和 argv flags（库不读取宿主程序参数）。
 - **外部输出**：`Scope::use_stdout()`、`Scope::use_stderr()` 返回 `Copy` 的 UI 线程句柄 `OutputWriter`，提供 `write(&str)`，按 runtime id 经状态句柄共用的线程局部注册表找到驱动安装的 `WriteDestination`。render 中写入在 debug 构建下 panic；空字符串忽略；卸载完成最终绘制、开始树清理时关闭写入，清理中的写入丢弃。交互模式擦掉帧、写数据、重画最后绘制的帧及其光标，同 Ink 的 `writeToStdout` / `writeToStderr`；外部写不等窗口，不消费待绘制帧，不改窗口。stdout 用一次 write 发出 `[bsu] + clear + data + redraw + [esu]`；stderr 用 stdout 发出 `[bsu] + clear`、stderr 发出 data、stdout 发出 `redraw + [esu]`，同步序列的条件同帧输出。app 将输出状态与 Runtime 分开持有，执行用户 render、effect、cleanup 时不借用输出状态；layout effect 中的 write 在调用时到达终端，重画前一次绘制的帧，首帧绘制前没有帧可重画。非交互模式把数据原样写给目标流；`render_to_string` 没有目的地，丢弃写入。不捕获 `println!`：它直接写 fd 1，安全代码拦不住；UI 运行期间改用这两个 write。
 - **外部输出的换行**与 Ink 不同：交互模式把前一个字节不是 `\r` 的 `\n` 转成 `\r\n`，数据末尾不是 `\n` 时补 `\r\n`。crossterm 的 raw mode（M3）清除 `OPOST`，裸 `\n` 不会回到第 0 列；Node raw mode 保留 `ONLCR`。重画依赖 cell diff 的第 0 列起点，缺少结尾换行会覆盖数据。非交互和 debug 模式不转换数据。
 - **debug 外部输出**同 Ink：stdout write 向 `testing::render` 的 `frames()` 添加一项 `data + 累计 Static + 上次 live`；stderr write 向 `stderr()` 添加 data，再向 `frames()` 添加 `累计 Static + 上次 live`。顺序按写入时刻记录，每一步结束时并入 `frames()` / `stderr()`；在步进之外经保留的句柄写入的内容，下一步后出现。`TestTerminal::output()` 按写入顺序记录 stdout / stderr，`writes()` 与 `stderr()` 分流读取。
-- **恢复终端**：退出、panic、SIGINT / SIGTERM / SIGHUP 时显示光标、退出备用屏、把光标移到帧下方。信号先卸载、恢复，再按原信号退出，同 Ink 的 signal-exit。正常卸载先提交未完成工作、写待绘制帧，再运行树清理，最后恢复终端；无待绘制帧时不重画，因此 clear 后卸载不恢复内容。panic 中的 Drop 跳过提交和 paint，先恢复终端再运行清理，避免清理中的 panic 导致 abort 前终端未恢复。Ctrl+Z 挂起与 SIGCONT 后重画在 M4。
+- **恢复终端**：退出、panic、SIGINT / SIGTERM / SIGHUP 时显示光标、退出备用屏、把光标移到帧下方。signal-hook iterator 线程向所有 live app 转发 SIGINT / SIGTERM / SIGHUP 与 SIGWINCH。所有 app 位于 wait_until_exit 时，各 UI 循环卸载并运行清理，最后一个注册移除后用 `emulate_default_handler` 按原信号终止，其他已卸载循环等待进程结束；保留首个终止信号。任一 app 位于循环外（包括 render 到 wait 之间、手动卸载期间或同线程嵌套 wait 暂停的外层循环），信号线程恢复所有 live app 后终止，不运行树清理。最后一个 app 卸载后打开 `register_conditional_default` 的原子条件，三种信号恢复默认效果；信号设施保持安装，避免 signal-hook unregister 后残留 handler 吞掉信号。正常卸载先提交未完成工作、写待绘制帧，再运行树清理，最后恢复终端；无待绘制帧时不重画，因此 clear 后卸载不恢复内容。panic 中的 Drop 跳过提交和 paint，先恢复终端再运行清理，避免清理中的 panic 导致 abort 前终端未恢复。每次 Terminal 操作连同其完成后的恢复字节交给驱动，写入与发布快照共用锁：主屏来自不改变 Output 状态的 done 字节，备用屏为 `CSI ?1049l CSI ?25h`；stderr 外部写跨流阶段还结束未闭合的同步更新。首个恢复者写快照并标记已恢复，后续写入（包括 unwinding Drop）丢弃。测试 Terminal 忽略快照。render 安装一次进程 panic hook，先恢复当前 panic 线程拥有的 app，再调用原 hook；其他线程 panic 不碰 UI 终端。`cfg(panic = "abort")` 下恢复所有 live app。M4 增加错误界面；Ctrl+Z 挂起与 SIGCONT 后重画在 M4。
 
 ## 输入
 

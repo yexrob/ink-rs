@@ -40,7 +40,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `colon-colors.tsx` | 16 | M0 | 16 | `tests/colon_colors.rs` |
 | `colorize.ts` | 16 | M0 | 16 | `tests/colorize.rs` |
 | `component-regressions.tsx` | 4 | M1 | 2 | `tests/component_regressions.rs` |
-| `components.tsx` | 93 | M0 / M1 / M2 | 63 | `tests/components.rs` |
+| `components.tsx` | 93 | M0 / M1 / M2 | 65 | `tests/components.rs`、`src/driver/tests.rs` |
 | `content-offset.tsx` | 23 | M0 | 24 | `tests/content_offset.rs` |
 | `cursor-exit-position.tsx` | 6 | M2 | 3 | `tests/cursor_exit_position.rs`、`src/output/tests/cursor_exit_position.rs` |
 | `cursor-helpers.tsx` | 17 | — | 0 | 不适用，cell diff 没有对应内部函数 |
@@ -142,7 +142,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 - M1 已移植：`hooks`
 - M1 已移植：`remeasure text dimensions on text change`、`replace child node with text`、`reset prop when it’s removed from the element`
 - M2 已移植：非 TTY、interactive 覆盖、备用屏幕和非交互 Static 输出，见 `tests/components.rs`。
-- 后续 M2：`render only last frame when run in CI`、`render all frames if CI environment variable equals false`，依赖驱动的 CI 检测。
+- M2 已移植：`render only last frame when run in CI`、`render all frames if CI environment variable equals false`，在 `src/driver/tests.rs` 使用同步循环、给定 CI 值与内存终端。20ms 线程持有 AppHandle，五次 tick 后丢弃，循环自然结束；保留 Counter 0–4 不出现 / Counter 5 出现，以及交互 Counter 0–5 都出现的原断言，补充 Static #1–#5 各一次。
 - 不移植与后续里程碑的测试见 [M2 文件中不移植的测试](#m2-文件中不移植的测试)。
 
 ### `content-offset.tsx`
@@ -326,7 +326,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 ### `write-synchronized.tsx`
 
 - 不适用，文件检查 Ink 内部函数与常量：`bsu is the expected synchronized update sequence`、`esu is the expected synchronized update sequence`、`shouldSynchronize returns true for interactive TTY stream`、`shouldSynchronize returns false for non-interactive TTY stream`、`shouldSynchronize returns false for non-TTY stream`、`shouldSynchronize uses CI detection when interactive is not specified`、`shouldSynchronize returns false for non-TTY stream when interactive is not specified`。
-- 覆盖位置：`render.tsx` 的 `no bsu/esu when output is unchanged`、`bsu/esu wraps throttledLog trailing call` 检查交互式 TTY 的序列与无变化分支；`components.tsx` 的 `render all frames when interactive is explicitly true`、`interactive option overrides TTY detection`、`alternate screen - ignored when non-interactive`、`alternate screen - ignored when isTTY is false`、`alternate screen - ignored when isTTY is false even if interactive is true` 检查非 TTY 与非交互分支。CI 环境检测留给驱动，本阶段传入已解析的 CI 值，不运行环境检测用例。
+- 覆盖位置：`render.tsx` 的 `no bsu/esu when output is unchanged`、`bsu/esu wraps throttledLog trailing call` 检查交互式 TTY 的序列与无变化分支；`components.tsx` 的 `render all frames when interactive is explicitly true`、`interactive option overrides TTY detection`、`alternate screen - ignored when non-interactive`、`alternate screen - ignored when isTTY is false`、`alternate screen - ignored when isTTY is false even if interactive is true` 检查非 TTY 与非交互分支。CI 环境检测由 `src/driver/environment/tests.rs` 的表测试覆盖；两条 CI fixture 移植由 `src/driver/tests.rs` 覆盖。
 
 ## 缺 API
 

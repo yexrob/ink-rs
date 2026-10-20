@@ -4,7 +4,7 @@ mod common;
 
 use std::time::Duration;
 
-use common::*;
+use common::{render, *};
 use ink_rs::*;
 
 // The OSC cases assert stripAnsi(output), not the escape sequence encoding.

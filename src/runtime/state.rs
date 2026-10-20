@@ -4,8 +4,11 @@ use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread::{self, ThreadId};
 
+use super::app_handle::UpdateQueue;
 use super::output::{CursorPosition, WriteDestination};
 use super::{Dirty, WindowSize};
 
@@ -127,6 +130,7 @@ struct StateValue {
 }
 
 pub(super) struct Store {
+    pub(crate) queue: Arc<UpdateQueue>,
     pub(super) window_size: Cell<WindowSize>,
     pub(super) id: u64,
     pub(super) cursor: Cell<Option<CursorPosition>>,
@@ -156,6 +160,7 @@ impl Drop for StateSlot {
 impl Store {
     pub(super) fn new() -> Rc<Self> {
         let store = Rc::new(Self {
+            queue: Arc::default(),
             window_size: Cell::new(WindowSize {
                 columns: 80,
                 rows: 24,
@@ -192,6 +197,7 @@ impl Store {
             slots.len() - 1
         };
         State {
+            thread: thread::current().id(),
             runtime: self.id,
             slot,
             generation: slots[slot].generation,
@@ -219,12 +225,14 @@ impl Drop for Store {
 }
 
 /// A UI-thread state handle. Writes after unmount are ignored; reads panic.
-/// A handle is `Copy` even when its value is not.
+/// A handle is `Copy + Send + Sync` even when its value is not. Access from
+/// any thread other than the owning UI thread panics.
 pub struct State<T> {
+    thread: ThreadId,
     runtime: u64,
     pub(super) slot: usize,
     generation: u64,
-    marker: PhantomData<Rc<T>>,
+    marker: PhantomData<fn() -> T>,
 }
 
 impl<T> Copy for State<T> {}
@@ -236,6 +244,11 @@ impl<T> Clone for State<T> {
 
 impl<T: 'static> State<T> {
     fn resolve(self) -> Option<Rc<StateValue>> {
+        assert_eq!(
+            self.thread,
+            thread::current().id(),
+            "state access off the UI thread"
+        );
         let store = resolve_store(self.runtime)?;
         let slots = store.slots.borrow();
         let slot = slots.get(self.slot)?;
@@ -276,6 +289,9 @@ impl<T: 'static> State<T> {
             std::mem::replace(&mut *current, Box::new(next))
         };
         value.dirty.mark();
+        if let Some(store) = resolve_store(self.runtime) {
+            store.queue.notify();
+        }
         drop(previous);
     }
 
@@ -287,6 +303,9 @@ impl<T: 'static> State<T> {
             return;
         }
         value.dirty.mark();
+        if let Some(store) = resolve_store(self.runtime) {
+            store.queue.notify();
+        }
         f(value
             .value
             .borrow_mut()

@@ -181,10 +181,19 @@ impl Output {
     }
 
     pub(crate) fn done(&mut self, output: &mut Vec<u8>) {
+        self.restore_bytes(output);
+        self.shown = true;
+        self.forget();
+    }
+
+    pub(crate) fn restore_bytes(&self, output: &mut Vec<u8>) {
         let mut bytes = Vec::new();
         if !self.live.is_empty() {
             // Ink src/log-update.ts:342-362 returns to the bottom before reset.
-            self.move_to(self.rest, &mut bytes);
+            let mut position = Self::new();
+            position.cursor = self.cursor;
+            position.reached = self.reached;
+            position.move_to(self.rest, &mut bytes);
             if self.full {
                 // design.md: unlike Ink, make room for the shell after a full frame.
                 bytes.extend_from_slice(b"\r\n");
@@ -192,9 +201,7 @@ impl Output {
         }
         if !self.shown {
             bytes.extend_from_slice(b"\x1b[?25h");
-            self.shown = true;
         }
-        self.forget();
         output.extend(bytes);
     }
 

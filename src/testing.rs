@@ -217,7 +217,7 @@ impl TestTerminal {
 }
 
 impl Terminal for TestTerminal {
-    fn write_stderr(&mut self, bytes: &[u8]) {
+    fn write_stderr(&mut self, bytes: &[u8], _restore: &[u8]) {
         self.writes.borrow_mut().push((
             OutputStream::Stderr,
             std::str::from_utf8(bytes)
@@ -226,7 +226,10 @@ impl Terminal for TestTerminal {
         ));
     }
 
-    fn write(&mut self, bytes: &[u8]) {
+    fn write(&mut self, bytes: &[u8], _restore: &[u8]) {
+        if bytes.is_empty() {
+            return;
+        }
         TestTerminal::write(
             self,
             std::str::from_utf8(bytes).expect("terminal output is UTF-8"),

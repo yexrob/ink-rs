@@ -1,10 +1,11 @@
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::output::Output;
 use crate::paint::{Cell, Frame, serialize_row};
-use crate::runtime::{Runtime, WriteDestination};
+use crate::runtime::{Runtime, UpdateQueue, WriteDestination};
 use crate::terminal::Terminal;
 use crate::{ColorLevel, CursorPosition, Element, OutputStream, RenderOptions, WindowSize};
 
@@ -61,6 +62,20 @@ struct AppOutput {
 }
 
 impl AppOutput {
+    fn restore_bytes(&self) -> Vec<u8> {
+        if self.alternate {
+            return b"\x1b[?1049l\x1b[?25h".to_vec();
+        }
+        let mut bytes = Vec::new();
+        if self.interactive {
+            self.output.restore_bytes(&mut bytes);
+            if self.tty {
+                synchronize(&mut bytes);
+            }
+        }
+        bytes
+    }
+
     fn paint(
         &mut self,
         mut frame: Frame,
@@ -117,7 +132,7 @@ impl AppOutput {
         if self.interactive && self.tty {
             synchronize(&mut bytes);
         }
-        self.terminal.write(&bytes);
+        self.terminal.write(&bytes, &self.restore_bytes());
     }
 
     fn clear(&mut self) {
@@ -131,8 +146,8 @@ impl AppOutput {
     fn external_write(&mut self, stream: OutputStream, data: &str) {
         if !self.interactive {
             match stream {
-                OutputStream::Stdout => self.terminal.write(data.as_bytes()),
-                OutputStream::Stderr => self.terminal.write_stderr(data.as_bytes()),
+                OutputStream::Stdout => self.terminal.write(data.as_bytes(), &[]),
+                OutputStream::Stderr => self.terminal.write_stderr(data.as_bytes(), &[]),
             }
             return;
         }
@@ -159,10 +174,18 @@ impl AppOutput {
             OutputStream::Stdout => bytes.extend(data_bytes),
             OutputStream::Stderr => {
                 if !bytes.is_empty() {
-                    self.terminal.write(&bytes);
+                    let mut restore = self.restore_bytes();
+                    if self.tty {
+                        restore.splice(..0, b"\x1b[?2026l".iter().copied());
+                    }
+                    self.terminal.write(&bytes, &restore);
                 }
                 bytes.clear();
-                self.terminal.write_stderr(&data_bytes);
+                let mut restore = self.restore_bytes();
+                if self.tty {
+                    restore.splice(..0, b"\x1b[?2026l".iter().copied());
+                }
+                self.terminal.write_stderr(&data_bytes, &restore);
             }
         }
         // Ink restoreLastOutput restores painted output. Pending commits stay
@@ -176,20 +199,22 @@ impl AppOutput {
             bytes.extend_from_slice(b"\x1b[?2026l");
         }
         if !bytes.is_empty() {
-            self.terminal.write(&bytes);
+            self.terminal.write(&bytes, &self.restore_bytes());
         }
     }
 
     fn restore(&mut self, mut final_output: Vec<u8>) {
         if self.alternate {
             final_output.extend_from_slice(b"\x1b[?1049l\x1b[?25h");
-            self.terminal.write(&final_output);
         } else {
             if self.interactive {
                 self.output.done(&mut final_output);
             }
-            self.write(final_output);
+            if self.interactive && self.tty {
+                synchronize(&mut final_output);
+            }
         }
+        self.terminal.restore(&final_output);
     }
 }
 
@@ -210,6 +235,18 @@ pub(crate) struct App {
 }
 
 impl App {
+    pub(crate) fn queue(&self) -> Arc<UpdateQueue> {
+        self.runtime.as_ref().expect("mounted app").queue()
+    }
+
+    pub(crate) fn terminal_size(&self) -> Option<(u16, u16)> {
+        self.destination.borrow().terminal.size()
+    }
+
+    pub(crate) fn take_error(&mut self) -> Option<std::io::Error> {
+        self.destination.borrow_mut().terminal.take_error()
+    }
+
     pub(crate) fn new(
         element: Element,
         options: Options,
@@ -223,7 +260,7 @@ impl App {
         let alternate = options.alternate_screen && interactive && tty;
         if alternate {
             // design.md starts the alternate frame at the first row.
-            terminal.write(b"\x1b[?1049h\x1b[H");
+            terminal.write(b"\x1b[?1049h\x1b[H", b"\x1b[?1049l\x1b[?25h");
         }
         let mut runtime = Runtime::new(
             element,
@@ -286,6 +323,7 @@ impl App {
 
     pub(crate) fn render_if_due(&mut self, now: Instant) -> Option<Instant> {
         let runtime = self.runtime.as_mut()?;
+        runtime.queue().drain();
         let commit = runtime.has_work().then(|| runtime.commit());
         if commit.is_some() {
             self.pending = true;
@@ -312,7 +350,7 @@ impl App {
             runtime.after_write();
             self.pending |= cursor != runtime.cursor();
         }
-        if runtime.has_work() {
+        if runtime.has_work() || runtime.queue().has_pending() {
             Some(now)
         } else if self.pending && self.interactive {
             Some(self.deadline.unwrap_or(now))

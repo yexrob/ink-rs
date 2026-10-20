@@ -3,6 +3,7 @@ use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::rc::{Rc, Weak};
+use std::sync::Arc;
 use std::time::Instant;
 
 use taffy::{NodeId, Point};
@@ -17,6 +18,7 @@ use crate::{
 use hooks::{Hook, Kind, Value};
 use state::{RenderGuard, Store};
 
+mod app_handle;
 mod hooks;
 mod output;
 mod state;
@@ -24,6 +26,8 @@ mod state;
 #[cfg(test)]
 mod tests;
 
+pub use app_handle::AppHandle;
+pub(crate) use app_handle::{UpdateQueue, Wake};
 pub use hooks::Scope;
 pub(crate) use output::WriteDestination;
 pub use output::{CursorPosition, OutputStream, OutputWriter};
@@ -364,6 +368,10 @@ pub(crate) struct Runtime {
 }
 
 impl Runtime {
+    pub(crate) fn queue(&self) -> Arc<UpdateQueue> {
+        self.instance.store.queue.clone()
+    }
+
     pub(crate) fn new(element: Element, options: RenderOptions) -> Self {
         let mut tree = HostTree::new();
         let root = host::create_view(
@@ -428,6 +436,7 @@ impl Runtime {
     pub(crate) fn begin_unmount(&self) {
         // Ink sets isUnmounted before React runs teardown cleanups.
         self.instance.store.unmounting.set(true);
+        self.instance.store.queue.close();
     }
 
     pub(crate) fn render_if_due(
@@ -435,14 +444,15 @@ impl Runtime {
         now: Instant,
         write: impl FnOnce(paint::Frame),
     ) -> Option<Instant> {
+        self.queue().drain();
         if !self.has_work() {
-            return None;
+            return self.queue().has_pending().then_some(now);
         }
         self.commit();
         write(self.paint());
         self.passive_effects();
         self.after_write();
-        self.has_work().then_some(now)
+        (self.has_work() || self.queue().has_pending()).then_some(now)
     }
 
     pub(crate) fn has_work(&self) -> bool {

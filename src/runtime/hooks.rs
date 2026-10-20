@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use super::output::{CursorCleanup, CursorPosition, OutputStream, OutputWriter};
 use super::state::{ElementMetrics, NodeRef, State, StateSlot, Store};
-use super::{Dirty, WindowSize};
+use super::{AppHandle, Dirty, WindowSize};
 
 type Setup = Box<dyn FnOnce() -> Box<dyn Any>>;
 
@@ -53,6 +53,12 @@ pub struct Scope<'a> {
 }
 
 impl Scope<'_> {
+    /// Returns a thread-safe handle for submitting updates to this app.
+    /// The hook does not retain a handle; the returned handle keeps the loop alive.
+    pub fn use_app(&mut self) -> AppHandle {
+        self.store.queue.handle()
+    }
+
     /// Returns the current window dimensions in cells. Changes to either
     /// dimension schedule this component. String and debug renders use
     /// [`crate::RenderOptions::columns`] and 24 rows.

@@ -19,6 +19,8 @@ mod app;
 mod border;
 mod color;
 mod components;
+#[cfg(unix)]
+mod driver;
 mod element;
 mod host;
 mod layout;
@@ -36,11 +38,13 @@ pub use app::Options;
 pub use border::{BorderStyle, BoxChars};
 pub use color::{Color, ColorLevel, ParseColorError};
 pub use components::{Newline, Spacer, Static, Text, Transform, View};
+#[cfg(unix)]
+pub use driver::{Instance, render};
 pub use element::{Element, Key, TextChild};
 pub use render::{RenderOptions, render_to_string};
 pub use runtime::{
-    CursorPosition, ElementMetrics, NodeRef, OutputStream, OutputWriter, Scope, State, WindowSize,
-    component, measure_element,
+    AppHandle, CursorPosition, ElementMetrics, NodeRef, OutputStream, OutputWriter, Scope, State,
+    WindowSize, component, measure_element,
 };
 pub use style::{
     AlignContent, AlignItems, AlignSelf, Dimension, Display, FlexDirection, FlexWrap, Inset,

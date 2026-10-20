@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::*;
+use common::{render, *};
 use ink_rs::*;
 
 fn strip_ansi(input: &str) -> String {

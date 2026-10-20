@@ -1,5 +1,5 @@
-use std::marker::PhantomData;
 use std::rc::Rc;
+use std::thread::{self, ThreadId};
 
 use super::state::{Store, assert_not_rendering, resolve_store};
 
@@ -27,12 +27,13 @@ pub(crate) trait WriteDestination {
 }
 
 /// A copyable UI-thread writer returned by [`super::Scope::use_stdout`] or
-/// [`super::Scope::use_stderr`]. It can be retained by effects and callbacks.
+/// [`super::Scope::use_stderr`]. It is `Send + Sync`, but writing from a thread
+/// other than the owning UI thread panics. Use [`super::AppHandle::update`].
 #[derive(Clone, Copy)]
 pub struct OutputWriter {
     runtime: u64,
     stream: OutputStream,
-    marker: PhantomData<Rc<()>>,
+    thread: ThreadId,
 }
 
 impl OutputWriter {
@@ -40,7 +41,7 @@ impl OutputWriter {
         Self {
             runtime: store.id,
             stream,
-            marker: PhantomData,
+            thread: thread::current().id(),
         }
     }
 
@@ -48,6 +49,11 @@ impl OutputWriter {
     /// Empty writes and writes after app teardown begins are ignored.
     /// Panics in debug builds during render. Without a driver, writes are dropped.
     pub fn write(self, data: &str) {
+        assert_eq!(
+            self.thread,
+            thread::current().id(),
+            "output access off the UI thread"
+        );
         assert_not_rendering();
         if data.is_empty() {
             return;
