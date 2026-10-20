@@ -45,18 +45,21 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
 
 ## 编程模型
 
-- **组件**是函数 `fn(&mut Scope, &P) -> Element`，要求 `P: PartialEq`。props 没变时跳过整棵子树，等于默认带 memo。
+- **组件**是函数 `fn(&mut Scope, &P) -> Element`，要求 `P: PartialEq`。props 没变时跳过整棵子树，等于默认带 memo。`component(f, props)` 生成组件元素，组件身份按 `f` 的类型区分。
+- **比对**同 React：子元素有 key 按 key 对应，没有 key 按位置对应；类型或 key 变了，卸载旧实例、挂载新实例。
 - **hooks** 按调用顺序存放。debug 构建记录每个位置的类型，顺序变化时 panic 并报出组件名。
-- **状态句柄** `State<T>` 是 `Copy` 的分代句柄（runtime id、槽位、代数），读写经线程局部变量找到当前 runtime，放进闭包无需 clone。UI 运行时单线程、`!Send`，在其他线程使用句柄会 panic；其他线程通过 `Send` 的 `AppHandle` 提交更新。
+- **状态句柄** `State<T>` 是 `Copy` 的分代句柄（runtime id、槽位、代数），读写经线程局部变量找到当前 runtime，放进闭包无需 clone。UI 运行时单线程、`!Send`，在其他线程使用句柄会 panic；其他线程通过 `Send` 的 `AppHandle` 提交更新。一个线程可以同时运行多个实例。组件卸载后，写它的状态被忽略。
 - **写状态**：`set` 要求 `T: PartialEq`，值相等时不触发渲染；`update(|v| ..)` 表示明确修改，标脏。渲染过程中写状态在 debug 下 panic，派生值用 `use_memo`。
-- **调度**：一轮事件处理完，所有更新合并成一帧，重渲染标脏的组件和 props 变化的子树。定时器和动画引起的更新受 `max_fps` 限制（Ink 默认 30），键盘输入引起的更新不受限制。
+- **调度**：一轮事件处理完，所有更新合并成一帧，重渲染标脏的组件和 props 变化的子树。更新受 `max_fps` 限制（Ink 默认 30，窗口 34ms），同 Ink：窗口内第一次更新立即渲染，其余合并到窗口结束时渲染；Static 变化、resize、卸载不受限制。
 - **空闲**：没有变化时零唤醒、零渲染，由测试保证。
-- **effect**：`use_layout_effect` 在布局之后、写到终端之前执行，可以读元素尺寸，写状态会让这一帧在写出前重算；`use_effect` 在这一帧写到终端之后执行。清理靠返回值的 `Drop`；组件卸载时它的异步任务随 drop 取消。
+- **effect**：`use_layout_effect` 在布局之后、paint 之前执行，可以读元素尺寸，写状态会让这一帧在写出前重算，一帧写出一次；`use_effect` 在这一帧写到终端之后执行。Ink 在提交时写出，之后执行 layout effect，状态变了写第二帧；ink-rs 不写这个中间帧。清理靠返回值的 `Drop`；组件卸载时它的异步任务随 drop 取消。
+- **继承的属性**：View 的背景色经内建 context 传给后代 Text，同 Ink 的 `BackgroundContext`。props 相等而继承的值变了的组件，照常重渲染。
+- **元素尺寸**：`use_node_ref` 给出句柄，挂到 `View::node_ref`。`measure_element` 返回 x、y（相对根节点）、width、height，以及去掉边框的 client 尺寸，节点未挂载时全为 0。在 effect 和事件回调里读，读到的是最近一次布局。
 
 ### 一帧
 
 1. 驱动调 `dispatch`。按键交给活动的 `use_input` 回调，定时器到期和 `AppHandle` 的消息经同一入口进入。回调写状态，所属组件标脏。
-2. `render_if_due(now)` 到期时：重跑脏组件（props 相等的子树跳过）→ 子元素按 key 比对，产出 host 变更 → taffy 重算 → paint 出 Frame → `use_layout_effect` → output 差分写出 → `use_effect`。
+2. `render_if_due(now)` 到期时：重跑脏组件（props 相等的子树跳过）→ 子元素按 key 比对，产出 host 变更 → taffy 重算 → `use_layout_effect`，写了状态回到第一步 → paint 出 Frame → output 差分写出 → `use_effect`。
 3. 返回下一次唤醒的时间；没有脏组件、没有定时器时返回 `None`。
 
 ## 事件循环
@@ -101,7 +104,7 @@ M0 的 API（`src/lib.rs`）：
 - `Element`：`View`、`Text`、`Static`、`Transform`、`Newline`、`Spacer`、`Option<T>`、`Vec<T>` 可以转成它；`Element::fragment` 对应 `<>…</>`。字符串不是 `Element`，与 Ink 一样，文本要放进 `Text`，`View::child("x")` 编译不过。
 - `Styled` trait：方法名是 Ink 的 Box props 改 snake_case。数字是格子数，`Percent(50.0)` 是百分比，颜色用 `Color` 枚举，`"…".parse::<Color>()` 解析 Ink 的颜色字符串。
 - `Text` 的子节点是 `TextChild`：字符串、嵌套的 `Text`/`Transform`、`Newline`，或渲染成文本的 `Element`。
-- `render_to_string(element, RenderOptions { columns, color_level })`：Static 输出在前，行尾没有多余空格（带样式的格子除外），末尾没有换行。
+- `render_to_string(element, RenderOptions { columns, color_level })`：Static 输出在前，行尾没有多余空格（带样式的格子除外），末尾没有换行。M1 起经运行时：挂载、渲染一帧、取输出、执行 `use_effect`、卸载。`use_layout_effect` 写的状态进入输出，`use_effect` 写的不进入，同 Ink。
 
 包名 `ink-rs`，lib 名 `ink_rs`。crates.io 上的 `ink` 属于 Parity 的智能合约框架 ink!，对外介绍时注明两者无关。
 
@@ -120,6 +123,7 @@ M0 的 API（`src/lib.rs`）：
 - **diff 是唯一有状态的部分。** paint 是纯函数，输入节点树和终端尺寸，输出网格，每帧整帧重画；局部重画等有了性能数据再讨论。diff 保存上一帧网格，保证它与屏幕上的内容一致。
 - **按单元格比较。** 样式在变化处切换。行尾用 EL（清到行尾）代替补空格：补出的空格在窗口变窄时会被终端重排成乱行。
 - **同步输出。** 每帧包在 `CSI ?2026` 里，避免闪烁。
+- **Static 是 host 节点。** output 记住已写出的条目数，只写新条目。不复刻 Ink 的 index 状态和每次追加的两次提交。只跟踪树中第一个 Static，同 Ink。
 - **非全屏模式的规则：不写之后够不着的行。** `Static` 写进 scrollback 一次，此后不改。底部可刷新区域的高度上限是屏高，超出部分从顶部裁掉，不清屏、不整屏重绘。持续增长的内容应放进 `Static`。
 - **resize** 没有精确解法，各家终端重排行为不同，策略在真实终端上测过之后定。
 - **光标**对应 Ink 的 `useCursor`：组件声明光标位置，每帧结束后把真实光标移过去，输入法候选框靠它定位。
@@ -135,7 +139,7 @@ crossterm 负责读事件和切换终端模式，不负责画面输出。hooks �
 Ink 的测试是规格，分四层：
 
 1. `render_to_string`：纯函数，M0 的验收。
-2. `testing::render`：对应 ink-testing-library，能取最后一帧、模拟按键、替换时钟（M1）。
+2. `testing::render`：对应 ink-testing-library 的 debug 模式，每渲染一帧记录一帧，不节流（M1）。模拟按键在 M3，假时钟随节流在 M2。
 3. 输出字节交给 vt100 模拟器执行，检查屏幕和 scrollback（M2）。
 4. portable-pty 跑示例程序，测 raw mode、Ctrl+C、退出码、挂起（M3 起）。
 
@@ -157,10 +161,10 @@ Ink 的测试是规格，分四层：
 | 阶段 | 内容 | 验收 |
 |---|---|---|
 | M0 | View/Text、布局、文本、边框、`render_to_string`；元素是数据，没有运行时 | 移植的 Ink 布局和文本测试通过 |
-| M1 | 组件树、hooks、按 key 比对、调度、测试驱动与 `testing::render` | 断言重渲染次数，空闲时零渲染 |
-| M2 | 两种输出模式、Static 跨帧、光标、非 TTY、终端恢复、同步驱动 | vt100 场景测试 |
+| M1 | 组件树、hooks、按 key 比对、调度、元素尺寸测量、测试驱动与 `testing::render` | 断言重渲染次数，空闲时零渲染 |
+| M2 | 两种输出模式、Static 跨帧、`max_fps` 节流、光标、非 TTY、终端恢复、同步驱动 | vt100 场景测试 |
 | M3 | 输入、焦点、粘贴、kitty 键盘协议、退出 | PTY 测试 |
-| M4 | 动画、元素尺寸测量、panic 时的错误界面、挂起恢复、tokio 驱动；移植 Ink 的示例 | 逐个对照示例 |
+| M4 | 动画、`use_box_metrics`、panic 时的错误界面、挂起恢复、tokio 驱动；移植 Ink 的示例 | 逐个对照示例 |
 | M5 | 宏 DSL、屏幕阅读器模式 | — |
 
 ## 平台

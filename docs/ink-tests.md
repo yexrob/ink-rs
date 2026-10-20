@@ -7,22 +7,22 @@
 Ink 有 95 个测试文件、1,646 个测试。
 
 - **M0**：40 个文件、755 个测试。移植 615 个，写成 619 个 `#[test]`（`content-offset.tsx` 的一个参数化测试按参数拆成 5 个），上游跳过的 4 个中，3 个标 `#[ignore]`，1 个在 taffy 下通过。未移植 140 个，原因见下表，明细见[下文](#m0-文件中未移植的测试)。
-- **其他 55 个文件**（891 个测试）：52 个随 M1–M5 移植，3 个不适用。
+- **其他 55 个文件**（891 个测试）：50 个随 M1–M5 移植，5 个不适用。M1 文件中不移植的测试见[下文](#m1-文件中不移植的测试)。
 
 | 未移植原因 | 数量 | 处理 |
 |---|---:|---|
 | React 并发模式下的重复测试（`… - concurrent`） | 46 | 不移植 |
-| 重渲染、state、effect | 37 | M1 |
+| 重渲染、state、effect | 35 | M1 |
 | Static 跨帧、非 TTY / CI、备用屏幕 | 32 | M2 |
 | 输入、raw mode | 6 | M3 |
 | 组件抛错 | 2 | M4 |
 | 屏幕阅读器 | 2 | M5 |
 | 缺 API | 1 | 见[缺 API](#缺-api) |
-| 不适用 | 14 | 不移植 |
+| 不适用 | 16 | 不移植 |
 
 ## 按文件
 
-里程碑为 M0 的文件，表中是移植的部分，其余见下一节。"—" 表示不适用：`build-output.ts` 检查 npm 包的构建产物，`is-devtools-reachable.tsx` 测 React DevTools 的连接，`style-types.ts` 是 TypeScript 类型检查，Rust 由类型系统保证。
+里程碑为 M0 的文件，表中是移植的部分，其余见下一节。"—" 表示不适用：`build-output.ts` 检查 npm 包的构建产物，`is-devtools-reachable.tsx` 测 React DevTools 的连接，`style-types.ts` 是 TypeScript 类型检查，Rust 由类型系统保证。`styles.ts` 直接调用 Yoga 的 API，去掉样式后的行为由各布局文件的重渲染测试和 `style-update-consistency.tsx` 覆盖。`static-abandoned-render.tsx` 依赖 Suspense 和 transition。
 
 | Ink 文件 | Ink 测试数 | 里程碑 | 移植的 `#[test]` | Rust 文件 |
 |---|---|---|---|---|
@@ -96,7 +96,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `sanitize-ansi.ts` | 50 | M0 | 50 | `src/text/sanitize/tests.rs` |
 | `screen-reader.tsx` | 33 | M5 |  |  |
 | `squash-text-nodes.tsx` | 2 | M0 | 2 | `tests/squash_text_nodes.rs` |
-| `static-abandoned-render.tsx` | 1 | M1 |  |  |
+| `static-abandoned-render.tsx` | 1 | — |  |  |
 | `static-blank-lines.tsx` | 9 | M0 | 9 | `tests/static_blank_lines.rs` |
 | `static-runtime-blank-lines.tsx` | 8 | M2 |  |  |
 | `static-string-replacement.tsx` | 4 | M1 |  |  |
@@ -104,7 +104,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `style-types.ts` | 1 | — |  |  |
 | `style-update-consistency.tsx` | 15 | M1 |  |  |
 | `styled-combining-marks.tsx` | 9 | M0 | 9 | `tests/styled_combining_marks.rs` |
-| `styles.ts` | 17 | M1 |  |  |
+| `styles.ts` | 17 | — |  |  |
 | `suspend-terminal.tsx` | 14 | M4 |  |  |
 | `suspension-exit.tsx` | 2 | M4 |  |  |
 | `suspension-handle.tsx` | 2 | M4 |  |  |
@@ -159,7 +159,8 @@ Ink 有 95 个测试文件、1,646 个测试。
 
 ### `flex-align-content.tsx`
 
-- M1：`clears alignContent on rerender to default flex-start`、`clears alignContent from stretch on rerender to default flex-start`、`clears alignContent when prop is omitted on rerender`
+- M1：`clears alignContent on rerender to default flex-start`、`clears alignContent from stretch on rerender to default flex-start`
+- 不适用：`clears alignContent when prop is omitted on rerender`。它与第一个用例的差别是 JS 中缺少的键与值为 `undefined` 的键，Rust 里两者是同一个测试。
 - 并发：`align content center`
 
 ### `flex-direction.tsx`
@@ -197,7 +198,8 @@ Ink 有 95 个测试文件、1,646 个测试。
 
 ### `position.tsx`
 
-- M1：`clears top offset on rerender`、`clears percentage top and left offsets on rerender`、`clears percentage top and left offsets when props are omitted on rerender`、`clears bottom and right offsets on rerender`
+- M1：`clears top offset on rerender`、`clears percentage top and left offsets on rerender`、`clears bottom and right offsets on rerender`
+- 不适用：`clears percentage top and left offsets when props are omitted on rerender`，原因同 `flex-align-content.tsx`。
 - 并发：`absolute position with top and left offsets`
 
 ### `render-to-string.tsx`
@@ -223,6 +225,18 @@ Ink 有 95 个测试文件、1,646 个测试。
 - 不适用：`wraps a fraction of a column like one column`（宽度是整数格）、`evicts old cached results`（缓存的内部状态）
 - 移植了一部分：`keeps text at its natural width when there is no room to wrap` 缺宽度 `-1` 的断言，无符号宽度表示不了；`uses separate cache entries for texts that end with digits` 和 `does not reuse a cached result from a wider box` 保留输出断言，去掉清缓存的步骤。
 
+## M1 文件中不移植的测试
+
+- `component-regressions.tsx`：`concurrent: true` 的 2 个是并发模式下的重复测试。
+- `measure-element.tsx`：
+  - 不适用：`measure element returns zeros for node without yoga`。它构造一个没有 Yoga 节点的假元素，Rust 里没有这种节点。
+  - M2：`calculate layout while rendering is throttled`，依赖节流和非 debug 输出。
+- `reconciler.tsx`：
+  - 不适用：`fragment refs remain unsupported while their children render and update`（Fragment ref）、`terminal host updates complete inside a transition`（transition）、`Suspense hides nested text while showing its fallback`、`resuming Suspense preserves display none`、`support suspense`（Suspense）。
+  - 并发：`support suspense with concurrent mode`。
+  - 重复：`replace child node with text` 与 `components.tsx` 的同名测试相同，移植在 `tests/components.rs`。
+- `static-abandoned-render.tsx`、`styles.ts`：整个文件不适用，原因见[按文件](#按文件)。
+
 ## 缺 API
 
 - `<Text backgroundColor="">`：Ink 用空字符串表示不继承父 `Box` 的背景色。Rust 的 `Text::background_color` 收 `Option<Color>`，`None` 表示继承，没有表达"无背景"的值。影响 `background.tsx` 的 `Mixed text with and without background inheritance`。
@@ -238,6 +252,9 @@ Ink 有 95 个测试文件、1,646 个测试。
 - **`overflow.tsx` 的越界写入用例**：`columns: 10` 时，Ink 把右边框写到行宽之外，JS 稀疏数组留下的空洞在拼接时被跳过，内部行宽 11 格。移植版按网格补空格，内部行与边框行同宽，都是 12 格。
 - **`c1-rendering.tsx` 宽度 4 的超链接用例**：wrap-ansi 折行时用 BEL 结尾重开超链接，叠在原链接内，第二行出现两次打开、两次关闭。移植版每段只打开、关闭一次，保留原终结符。
 - **`flex-align-self.tsx` 的 `row - align self baseline`**：Yoga 在有子项按 baseline 对齐时按内容决定行高，`flex-end` 的子项随之贴在内容行的底部。taffy 按 CSS，单行容器的行高等于容器高度，移植版的期望值按 CSS 改写。
+
+- **layout effect 写状态时少写一帧。** Ink 在提交时写出，之后执行 layout effect，状态变了写第二帧。ink-rs 在 paint 前执行 layout effect，一帧写出一次。按写出次数或第一帧断言的测试随之调整。
+- **Static 追加时写出一次。** Ink 的 Static 靠 index 状态和 layout effect 隐藏已写出的条目，每次追加提交两次、写出两次。ink-rs 的 Static 是 host 节点，追加时写出一次。
 
 ## Ink 期望中反直觉的行为
 
