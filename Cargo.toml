@@ -25,3 +25,7 @@ vt100 = "0.16"
 [[test]]
 name = "pty"
 harness = false
+
+[[test]]
+name = "examples_pty"
+harness = false

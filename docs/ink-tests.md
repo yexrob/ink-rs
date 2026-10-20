@@ -21,7 +21,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 
 ## 按文件
 
-里程碑为 M0 的文件，表中是移植的部分，其余见下一节。"—" 表示不适用：`build-output.ts` 检查 npm 包的构建产物，`is-devtools-reachable.tsx` 测 React DevTools 的连接，`style-types.ts` 是 TypeScript 类型检查，Rust 由类型系统保证。`styles.ts` 直接调用 Yoga 的 API，去掉样式后的行为由各布局文件的重渲染测试和 `style-update-consistency.tsx` 覆盖。`static-abandoned-render.tsx` 依赖 Suspense 和 transition。`tests/pty.rs` 不用 libtest，其中每个 PTY 用例按一个 `#[test]` 计数。
+里程碑为 M0 的文件，表中是移植的部分，其余见下一节。"—" 表示不适用：`build-output.ts` 检查 npm 包的构建产物，`is-devtools-reachable.tsx` 测 React DevTools 的连接，`style-types.ts` 是 TypeScript 类型检查，Rust 由类型系统保证。`styles.ts` 直接调用 Yoga 的 API，去掉样式后的行为由各布局文件的重渲染测试和 `style-update-consistency.tsx` 覆盖。`static-abandoned-render.tsx` 依赖 Suspense 和 transition。`tests/pty.rs` 与 `tests/examples_pty.rs` 不用 libtest，其中每个 PTY 用例按一个 `#[test]` 计数。
 
 | Ink 文件 | Ink 测试数 | 里程碑 | 移植的 `#[test]` | Rust 文件 |
 |---|---|---|---|---|
@@ -89,7 +89,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `reconciler.tsx` | 14 | M1 | 7 | `tests/reconciler.rs` |
 | `render-callback.tsx` | 4 | — | 0 | 缺 API / 不适用，见下文 |
 | `render-to-string.tsx` | 37 | M0 / M1 / M4 | 34 | `tests/render_to_string.rs` |
-| `render.tsx` | 119 | M2 / M3 / M4 | 52 | `tests/render.rs`、`tests/pty.rs`、`tests/examples.rs` |
+| `render.tsx` | 119 | M2 / M3 / M4 | 56 | `tests/render.rs`、`tests/pty.rs`、`tests/examples.rs`、`tests/examples_pty.rs` |
 | `rendering-regressions.tsx` | 2 | M0 | 2 | `tests/rendering_regressions.rs` |
 | `rerender-input.tsx` | 4 | M3 | 3 | `tests/rerender_input.rs` |
 | `sanitize-ansi.ts` | 50 | M0 | 50 | `src/text/sanitize/tests.rs` |
@@ -263,10 +263,10 @@ Ink 有 95 个测试文件、1,646 个测试。
 
 ### `render.tsx`
 
-- 不适用，`rerender on resize` 的 resize-listener 数量断言：驱动轮询事件，不使用 Node EventEmitter；unmount 消耗 app。内容与尺寸断言已移植。resize 示例归 M4，名称见本节示例清单。
+- 不适用，`rerender on resize` 的 resize-listener 数量断言：驱动轮询事件，不使用 Node EventEmitter；unmount 消耗 app。内容与尺寸断言已移植。resize 示例见 `tests/examples_pty.rs`。
 - 不适用，Node stream、JS undefined 或 ref/unref：`accepts standard Node streams without stream-specific assertions`、`handles input without requiring process ref methods`、`undefined stream options use the default streams`。
 - 不适用，Node TTY 流缺少 `setRawMode` 方法；ink-rs 由 `Terminal` 判断 stdin：`reports raw mode as unavailable when a TTY input stream lacks raw mode`。
-- M4，示例与挂起：`Jest example announces completion only after all results`、`subprocess example retains recent lines across chunks`、`terminal resize example stays open to report resized dimensions`、`suspend example reports the result of false`、`suspend example reports the result of true`、`suspend example reports the result of printf editor-command-ran`、`subprocess example strips ANSI sequences across chunks`、`subprocess example displays command launch errors`、`subprocess example decodes UTF-8 across chunks`。
+- M4，tokio 示例：`Jest example announces completion only after all results`、`subprocess example retains recent lines across chunks`、`subprocess example strips ANSI sequences across chunks`、`subprocess example displays command launch errors`、`subprocess example decodes UTF-8 across chunks`。
 - 不适用，React transition：`transition example deletes a whole grapheme from both queries`、`transition example ignores Enter in the search query`。
 - 不适用，断言 Ink 的整屏清除或逐行擦除次数；ink-rs 使用高度上限和 cell diff：`erase screen`、`erase screen where <Static> exists but interactive part is taller than viewport`、`erase screen where state changes in small viewport`、`#450: full-height rerenders should not repeatedly clear terminal`、`#450: shrink from full-height to rows - 1 should clear exactly once`、`#450: shrink from overflow to rows - 1 should clear exactly once`、`#450: <Static> with shrink from full-height should clear exactly once`、`#450: full-height rerenders with <Static> should not repeatedly clear terminal`。
 - 不适用，Windows 不在 v1 范围内：`#969: full-height rerenders on Windows should clear terminal between frames`。
@@ -391,7 +391,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 - **layout effect 写状态时少写一帧。** Ink 在提交时写出，之后执行 layout effect，状态变了写第二帧。ink-rs 在 paint 前执行 layout effect，一帧写出一次。按写出次数或第一帧断言的测试随之调整。
 - **`use_box_metrics` 首帧给值。** Ink 先写出全 0 的帧，passive effect 加微任务后写出测量值。ink-rs 在提交的每一轮刷新 ref 之后比较读者的度量，变了就在 paint 前重渲染，View 首次布局的那一帧即带测量值。`does not trigger extra re-renders when layout is unchanged` 的渲染次数由 Ink 的 2–3 次改为 2 次（未挂载一次、测量后一次）；两个 resize 用例改用 `testing::mount` 与 vt100 屏幕。
 - **`use_animation` 的观测边界。** 假时钟逐个运行截止时间，代替 FakeTimers 的 `tickAsync`，时间下界改为精确值。不断言 JS 定时器的创建与清除次数，共享定时器由 `src/runtime/tests.rs` 的截止时间测试覆盖。`reset` 是句柄，`reset is a stable function reference` 改为用挂载时的副本重置。恢复与改 interval 的归零在 layout effect 中写状态，paint 前重算，不写过时帧。`animations advance in debug mode when interactive is false` 用非交互的 `testing::mount` 与 120 fps，ink-rs 没有运行时 debug 选项。
-- **示例的观测边界。** `render.tsx` 的 16 个示例用例与 `alternate-screen-example.tsx` 不在 PTY 中运行示例进程：`tests/examples.rs` 以 `#[path]` 引入 `examples/<name>/app.rs`，用 `testing::mount` 在进程内挂载，终端尺寸同 Ink `term` 的参数（默认 100 列）。`waitForOutput` 改为越过节流窗口的 `advance`，读 vt100 屏幕。`eraseLines`、`cursorTo`、`cursorUp` 的字节检查改为屏幕行、光标位置与可见性；输出流上的正则改为屏幕行比较，`input example` 在重绘块中的行号改为屏幕的物理行。table 用例用 40 列的 `render_to_string` 代替 CI 子进程，JS 字符串长度改为 `text_width`。aria 用例以 `interactive: Some(false)` 代替 `CI=true`，N 个空格在一次 `input` 中送入，卸载后读最终帧。snake 的反向用例用假时钟推进一个 150ms 的 tick，代替等待 `Score:` 重绘。`alternate-screen-example.tsx` 的两个用例调用 `reduce`，代替解析子进程的 JSON，去掉 1 秒的 kill 计时器。incremental-rendering 示例截断长行，根节点取内容高度：ink-rs 按屏高裁掉帧顶部的行（见 app 高度上限），Ink 的测试读输出流，不受裁剪影响；截断后 30 行的终端放得下标题和选中项。期望文本不变。
+- **示例的观测边界。** `render.tsx` 的 16 个示例用例与 `alternate-screen-example.tsx` 不在 PTY 中运行示例进程：`tests/examples.rs` 以 `#[path]` 引入 `examples/<name>/app.rs`，用 `testing::mount` 在进程内挂载，终端尺寸同 Ink `term` 的参数（默认 100 列）。`waitForOutput` 改为越过节流窗口的 `advance`，读 vt100 屏幕。`eraseLines`、`cursorTo`、`cursorUp` 的字节检查改为屏幕行、光标位置与可见性；输出流上的正则改为屏幕行比较，`input example` 在重绘块中的行号改为屏幕的物理行。table 用例用 40 列的 `render_to_string` 代替 CI 子进程，JS 字符串长度改为 `text_width`。aria 用例以 `interactive: Some(false)` 代替 `CI=true`，N 个空格在一次 `input` 中送入，卸载后读最终帧。snake 的反向用例用假时钟推进一个 150ms 的 tick，代替等待 `Score:` 重绘。`alternate-screen-example.tsx` 的两个用例调用 `reduce`，代替解析子进程的 JSON，去掉 1 秒的 kill 计时器。incremental-rendering 示例截断长行，根节点取内容高度：ink-rs 按屏高裁掉帧顶部的行（见 app 高度上限），Ink 的测试读输出流，不受裁剪影响；截断后 30 行的终端放得下标题和选中项。期望文本不变。terminal-resize 与 suspend 的 4 个用例需要真实终端，在 PTY 中运行：`tests/examples_pty.rs` 同 `tests/pty.rs`，一个可执行文件兼作 fixture，引入示例的 `app.rs`。cell diff 只重写变化的格子，原始输出里搜不到整段 `Counter: 1` 或 `Columns: 60`，所以等待条件改为 vt100 屏幕上的文本，resize 时同步改屏幕尺寸；`ps.output = ''` 改为记录偏移，子进程输出 `editor-command-ran` 仍在原始输出中检查。
 - **错误界面的观测边界。** 位置取 Rust 的 `file:line:column`，不是 file URL，`renders source excerpts for file URLs containing spaces` 改为含空格的文件路径。调用栈只在设置 `RUST_BACKTRACE` 或 `RUST_LIB_BACKTRACE` 时显示，`catch and display error` 比较去色后的前 12 行（标签与消息、位置、7 行源码摘录），不比较 Ink 的栈行；两个 native 栈帧用例喂入构造的 std 格式 backtrace 文本。`ErrorBoundary catches and displays nested component errors` 把抛错组件放在 `Text` 中。`clean up raw mode when error is thrown` 用 `raw_mode_calls()` 为 `[true, false]` 代替 stdin spy。抛字符串、抛 undefined 改为 `panic_any(String)`、`panic_any(())`，后者的消息为 `Box<dyn Any>`。`waitUntilExit preserves the original component error` 经 `take_exit_result` 与 `into_payload` downcast 出 `Arc`，用 `Arc::ptr_eq` 比较身份。`render.tsx` 的 `should reject waitUntilExit when app exits during synchronous render error handling` 没有用户错误边界，改为首次渲染 panic，结果为 `Err(Panic)`。`exit.tsx` 的 `exit with thrown error` 在 `tests/pty.rs` 中重建 fixture，`main` 打印返回的错误；增加检查错误界面、终端恢复与退出码 0，fixture 关闭 backtrace。`render-to-string.tsx` 的两个抛错用例用外层 `catch_unwind` 接住 panic。
 - **Static 追加时写出一次。** Ink 的 Static 靠 index 状态和 layout effect 隐藏已写出的条目，每次追加提交两次、写出两次。ink-rs 的 Static 是 host 节点，追加时写出一次。
 

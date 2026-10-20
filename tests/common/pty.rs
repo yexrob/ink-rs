@@ -96,6 +96,26 @@ impl Session {
         self.writer.flush()
     }
 
+    // TIOCSWINSZ sends SIGWINCH to the foreground process group.
+    #[allow(dead_code)]
+    pub fn resize(&self, rows: u16, cols: u16) -> io::Result<()> {
+        self._master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(io::Error::other)
+    }
+
+    pub fn is_running(&mut self) -> io::Result<bool> {
+        if self.status.is_none() {
+            self.status = self.child.try_wait()?;
+        }
+        Ok(self.status.is_none())
+    }
+
     fn read(&mut self) -> Result<(), String> {
         if Instant::now() >= self.deadline {
             return Err(format!(
@@ -116,9 +136,7 @@ impl Session {
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
-        if self.status.is_none() {
-            self.status = self.child.try_wait().map_err(|error| error.to_string())?;
-        }
+        self.is_running().map_err(|error| error.to_string())?;
         Ok(())
     }
 
