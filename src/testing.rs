@@ -1,8 +1,14 @@
 //! A mounted tree with frame history, driven by calls to [`TestInstance::settle`].
 
-use std::time::Instant;
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
 
-use crate::{ColorLevel, Element, RenderOptions, paint::serialize_row, runtime::Runtime};
+use crate::app::{App, resolve_interactive};
+use crate::paint::serialize_row;
+use crate::runtime::Runtime;
+use crate::terminal::Terminal;
+use crate::{ColorLevel, Element, Options, RenderOptions};
 
 /// Mounts at 100 columns with basic colors, matching Ink's debug test helper.
 pub fn render(element: impl Into<Element>) -> TestInstance {
@@ -84,5 +90,117 @@ impl TestInstance {
                 .join("\n");
             self.frames.push(format!("{}{live}", self.static_output));
         })
+    }
+}
+
+/// In-memory stdout. Clones share the write log.
+#[derive(Clone)]
+pub struct TestTerminal {
+    writes: Rc<RefCell<Vec<String>>>,
+    size: Option<(u16, u16)>,
+    tty: bool,
+}
+
+impl TestTerminal {
+    /// Creates a TTY with the given dimensions.
+    pub fn new(columns: u16, rows: u16) -> Self {
+        Self {
+            writes: Rc::default(),
+            size: Some((columns, rows)),
+            tty: true,
+        }
+    }
+
+    /// Selects whether stdout is a TTY.
+    pub fn with_tty(mut self, tty: bool) -> Self {
+        self.tty = tty;
+        self
+    }
+
+    /// Makes the terminal size unknown, exercising the 80 by 24 fallback.
+    pub fn without_size(mut self) -> Self {
+        self.size = None;
+        self
+    }
+
+    /// Returns one string per terminal write.
+    pub fn writes(&self) -> Vec<String> {
+        self.writes.borrow().clone()
+    }
+
+    /// Writes existing terminal history before mounting an app.
+    pub fn write(&self, text: &str) {
+        self.writes.borrow_mut().push(text.to_owned());
+    }
+}
+
+impl Terminal for TestTerminal {
+    fn write(&mut self, bytes: &[u8]) {
+        TestTerminal::write(
+            self,
+            std::str::from_utf8(bytes).expect("terminal output is UTF-8"),
+        );
+    }
+
+    fn size(&self) -> Option<(u16, u16)> {
+        self.size
+    }
+
+    fn is_tty(&self) -> bool {
+        self.tty
+    }
+}
+
+/// Mounts and runs the first step. CI is false and the default color level is
+/// Basic, matching Ink's test helpers rather than the process environment.
+pub fn mount(element: impl Into<Element>, options: Options, terminal: &TestTerminal) -> TestApp {
+    let interactive = resolve_interactive(options.interactive, false, terminal.is_tty());
+    let mut app = TestApp {
+        app: App::new(
+            element.into(),
+            options,
+            Box::new(terminal.clone()),
+            interactive,
+            options.color_level.unwrap_or(ColorLevel::Basic),
+        ),
+        now: Instant::now(),
+    };
+    app.app.render_if_due(app.now);
+    app
+}
+
+/// A live app driven by a fake clock. Drop unmounts and restores the terminal.
+pub struct TestApp {
+    app: App,
+    now: Instant,
+}
+
+impl TestApp {
+    /// Reconciles the root and runs a step at the current clock time.
+    pub fn rerender(&mut self, element: impl Into<Element>) {
+        self.app.rerender(element.into());
+        self.app.render_if_due(self.now);
+    }
+
+    /// Runs a step now, then every due step through the target time.
+    pub fn advance(&mut self, duration: Duration) {
+        let target = self.now + duration;
+        while let Some(due) = self.app.render_if_due(self.now) {
+            if due > target {
+                break;
+            }
+            self.now = due;
+        }
+        self.now = target;
+    }
+
+    /// Erases the frame without discarding pending work.
+    pub fn clear(&mut self) {
+        self.app.clear();
+    }
+
+    /// Finishes pending work, runs cleanups, and restores the terminal.
+    pub fn unmount(mut self) {
+        self.app.unmount();
     }
 }

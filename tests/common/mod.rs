@@ -409,3 +409,48 @@ fn show(items: &[Item]) -> String {
     }
     out
 }
+
+/// A vt100 screen and scrollback fed from the in-memory app terminal.
+pub struct Screen {
+    parser: vt100::Parser,
+    columns: u16,
+}
+
+impl Screen {
+    pub fn new(terminal: &ink_rs::testing::TestTerminal, columns: u16, rows: u16) -> Self {
+        let mut parser = vt100::Parser::new(rows, columns, 1000);
+        for write in terminal.writes() {
+            parser.process(write.as_bytes());
+        }
+        Self { parser, columns }
+    }
+
+    pub fn rows(&self) -> Vec<String> {
+        self.parser.screen().rows(0, self.columns).collect()
+    }
+
+    pub fn scrollback(&mut self) -> Vec<String> {
+        self.parser.screen_mut().set_scrollback(usize::MAX);
+        let count = self.parser.screen().scrollback();
+        let mut lines = Vec::new();
+        for offset in (1..=count).rev() {
+            self.parser.screen_mut().set_scrollback(offset);
+            lines.push(self.rows()[0].clone());
+        }
+        self.parser.screen_mut().set_scrollback(0);
+        lines
+    }
+
+    pub fn lines(&mut self) -> Vec<String> {
+        let mut lines = self.scrollback();
+        lines.extend(self.rows());
+        lines
+    }
+}
+
+pub fn assert_no_full_clear(terminal: &ink_rs::testing::TestTerminal) {
+    let output = terminal.writes().join("");
+    for sequence in ["\x1b[2J", "\x1b[3J", "\x1b[1;1H\x1b[J"] {
+        assert!(!output.contains(sequence), "{output:?}");
+    }
+}

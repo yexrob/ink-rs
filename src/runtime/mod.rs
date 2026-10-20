@@ -285,6 +285,11 @@ impl Instance {
     }
 }
 
+pub(crate) struct Commit {
+    pub(crate) static_items: bool,
+    pub(crate) static_changed: bool,
+}
+
 pub(crate) struct Runtime {
     // A BTreeMap iterates live bindings, not a hash table's retained capacity.
     refs: BTreeMap<usize, NodeRef>,
@@ -295,6 +300,7 @@ pub(crate) struct Runtime {
     next: Option<Element>,
     options: RenderOptions,
     previous_static: Option<Rc<Dirty>>,
+    static_changed: bool,
 }
 
 impl Runtime {
@@ -324,6 +330,7 @@ impl Runtime {
             next: Some(Element::fragment([element])),
             options,
             previous_static: None,
+            static_changed: false,
         }
     }
 
@@ -336,15 +343,21 @@ impl Runtime {
         now: Instant,
         write: impl FnOnce(paint::Frame),
     ) -> Option<Instant> {
-        if self.next.is_none() && !self.instance.dirty.pending() {
+        if !self.has_work() {
             return None;
         }
         self.commit();
-        self.present(write);
-        self.instance.dirty.pending().then_some(now)
+        write(self.paint());
+        self.passive_effects();
+        self.after_write();
+        self.has_work().then_some(now)
     }
 
-    fn commit(&mut self) {
+    pub(crate) fn has_work(&self) -> bool {
+        self.next.is_some() || self.instance.dirty.pending()
+    }
+
+    pub(crate) fn commit(&mut self) -> Commit {
         for round in 0..50 {
             {
                 let _guard = RenderGuard::enter();
@@ -419,27 +432,38 @@ impl Runtime {
                 "maximum update depth exceeded (50 layout-effect rounds)"
             );
         }
-    }
-
-    /// The caller consumes the painted frame before passive effects run.
-    fn present(&mut self, write: impl FnOnce(paint::Frame)) {
-        let mut frame = {
-            let _guard = RenderGuard::enter();
-            paint::paint(&self.tree, self.root, self.options.color_level)
-        };
         let first_static = self.instance.first_static();
-        frame.static_changed = match (&self.previous_static, &first_static) {
+        self.static_changed |= match (&self.previous_static, &first_static) {
             (Some(previous), Some(current)) => !Rc::ptr_eq(previous, current),
             (None, None) => false,
             _ => true,
         };
         self.previous_static = first_static;
-        write(frame);
+        Commit {
+            static_items: self.instance.pending_static,
+            static_changed: self.static_changed,
+        }
+    }
+
+    pub(crate) fn paint(&mut self) -> paint::Frame {
+        let _guard = RenderGuard::enter();
+        // Static item retirement invalidates layout even without another commit.
+        // A clean tree hits taffy's root cache without laying out descendants.
+        layout::compute(&mut self.tree, self.root);
+        let mut frame = paint::paint(&self.tree, self.root, self.options.color_level);
+        frame.static_changed = std::mem::take(&mut self.static_changed);
+        frame
+    }
+
+    pub(crate) fn passive_effects(&mut self) {
         self.instance
             .collect_cleanups(false, &mut self.cleanups.passive);
         drain(&mut self.cleanups.passive);
         drain(&mut self.cleanups.states);
         self.instance.effects(false);
+    }
+
+    pub(crate) fn after_write(&mut self) {
         // React performSyncWorkOnRoot flushes passive effects before the sync
         // setIndex update from Static.tsx unmounts the items.
         if self.instance.pending_static {
@@ -453,8 +477,8 @@ impl Runtime {
             drain(&mut self.cleanups.layout);
             drain(&mut self.cleanups.passive);
             drain(&mut self.cleanups.states);
-            // Host mutations invalidate layout caches. Every subsequent present
-            // goes through commit's layout pass, even if reconciliation bails out.
+            // Host mutations invalidate layout caches. paint computes layout
+            // even without a commit, as on Ink's non-interactive final render.
         }
     }
 }

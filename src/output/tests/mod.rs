@@ -1,4 +1,5 @@
 use super::Output;
+use crate::app::synchronize;
 use crate::paint::{Cell, Frame};
 use crate::text::styled;
 
@@ -41,7 +42,7 @@ impl Terminal {
         Self {
             // Run the same ports with synchronized output enabled: its private
             // mode pair must not change screen semantics or no-write behavior.
-            output: Output::new(true),
+            output: Output::new(),
             parser: vt100::Parser::new(rows as u16, columns as u16, 100),
             columns,
             height: rows,
@@ -56,6 +57,7 @@ impl Terminal {
         let mut bytes = Vec::new();
         self.output
             .render(&frame(lines), cursor, self.columns, self.height, &mut bytes);
+        synchronize(&mut bytes);
         self.feed(&bytes);
         String::from_utf8(bytes).unwrap()
     }
@@ -63,6 +65,7 @@ impl Terminal {
     fn clear(&mut self) -> Vec<u8> {
         let mut bytes = Vec::new();
         self.output.clear(&mut bytes);
+        synchronize(&mut bytes);
         self.feed(&bytes);
         bytes
     }
@@ -70,6 +73,7 @@ impl Terminal {
     fn done(&mut self) {
         let mut bytes = Vec::new();
         self.output.done(&mut bytes);
+        synchronize(&mut bytes);
         self.feed(&bytes);
     }
 

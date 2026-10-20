@@ -15,11 +15,10 @@ pub(crate) struct Output {
     declared: Option<(usize, usize)>,
     shown: bool,
     full: bool,
-    synchronized: bool,
 }
 
 impl Output {
-    pub(crate) fn new(synchronized: bool) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             live: Vec::new(),
             cursor: (0, 0),
@@ -28,7 +27,6 @@ impl Output {
             declared: None,
             shown: true,
             full: false,
-            synchronized,
         }
     }
 
@@ -138,7 +136,7 @@ impl Output {
         self.declared = declared;
         self.full = full;
         self.reached = rest_y;
-        self.append(bytes, output);
+        output.extend(bytes);
     }
 
     pub(crate) fn clear(&mut self, output: &mut Vec<u8>) {
@@ -154,7 +152,7 @@ impl Output {
         }
         self.move_to((0, 0), &mut bytes);
         self.forget();
-        self.append(bytes, output);
+        output.extend(bytes);
     }
 
     pub(crate) fn done(&mut self, output: &mut Vec<u8>) {
@@ -172,7 +170,7 @@ impl Output {
             self.shown = true;
         }
         self.forget();
-        self.append(bytes, output);
+        output.extend(bytes);
     }
 
     fn hide(&mut self, bytes: &mut Vec<u8>) {
@@ -218,21 +216,6 @@ impl Output {
                 bytes.extend_from_slice(format!("\x1b[{}G", x + 1).as_bytes());
             }
             self.cursor.0 = x;
-        }
-    }
-
-    fn append(&self, bytes: Vec<u8>, output: &mut Vec<u8>) {
-        if bytes.is_empty() {
-            return;
-        }
-        // Ink src/write-synchronized.ts and src/ink.tsx:802-815; keep the pair
-        // and payload together instead of Ink's three stream writes.
-        if self.synchronized {
-            output.extend_from_slice(b"\x1b[?2026h");
-        }
-        output.extend(bytes);
-        if self.synchronized {
-            output.extend_from_slice(b"\x1b[?2026l");
         }
     }
 }

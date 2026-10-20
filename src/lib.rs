@@ -10,26 +10,29 @@
 //! frame, runs passive effects and unmounts with cleanup.
 //! [`testing::render`] keeps a tree mounted, records presented frames and
 //! exposes rerender and settle operations without terminal I/O.
+//! [`testing::mount`] drives a live app with [`Options`], an in-memory terminal,
+//! and a clock advanced by the test.
 //!
 //! See `docs/design.md` for the architecture and the milestone plan.
 
+mod app;
 mod border;
 mod color;
 mod components;
 mod element;
 mod host;
 mod layout;
-// Unused until the M2 instance and sync driver call it.
-#[allow(dead_code)]
 mod output;
 mod paint;
 mod render;
 mod runtime;
 mod style;
+mod terminal;
 mod text;
 
 pub mod testing;
 
+pub use app::Options;
 pub use border::{BorderStyle, BoxChars};
 pub use color::{Color, ColorLevel, ParseColorError};
 pub use components::{Newline, Spacer, Static, Text, Transform, View};

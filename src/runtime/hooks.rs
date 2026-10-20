@@ -135,7 +135,8 @@ impl Scope<'_> {
         value
     }
 
-    /// Runs after the frame is written. The returned value is dropped on
+    /// Runs after the commit, and after the frame is written when that frame
+    /// is not throttled. The returned value is dropped on
     /// dependency changes and unmount. Use `()` dependencies to run on mount.
     pub fn use_effect<D: PartialEq + 'static, C: 'static>(
         &mut self,

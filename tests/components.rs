@@ -2,6 +2,8 @@
 
 mod common;
 
+use std::time::Duration;
+
 use common::*;
 use ink_rs::*;
 
@@ -574,6 +576,222 @@ fn replace_child_node_with_text() {
     assert_ansi_eq(instance.last_frame(), &styled(&["{fg=green}test{/}"]));
     instance.rerender(component(example, true));
     assert_ansi_eq(instance.last_frame(), "x");
+}
+
+thread_local! {
+    static LIVE_COUNT: std::cell::Cell<Option<State<u32>>> = const { std::cell::Cell::new(None) };
+}
+
+fn live_counter(cx: &mut Scope, _: &()) -> Element {
+    let count = cx.use_state(|| 0);
+    LIVE_COUNT.set(Some(count));
+    Text::new(format!("Count: {}", count.get())).into()
+}
+
+fn noninteractive_counter(tty: bool, interactive: Option<bool>) {
+    let terminal = testing::TestTerminal::new(100, 24).with_tty(tty);
+    let mut app = testing::mount(
+        component(live_counter, ()),
+        Options {
+            interactive,
+            ..Options::default()
+        },
+        &terminal,
+    );
+    for count in 1..=3 {
+        LIVE_COUNT.get().unwrap().set(count);
+        app.advance(Duration::from_millis(10));
+    }
+    app.unmount();
+    for intermediate in ["Count: 0", "Count: 1", "Count: 2"] {
+        assert!(!terminal.writes().join("").contains(intermediate));
+    }
+    assert!(!terminal.writes().join("").contains("\x1b["));
+    assert!(terminal.writes().last().unwrap().contains("Count: 3"));
+}
+
+#[test]
+fn render_only_last_frame_when_stdout_is_not_a_tty() {
+    noninteractive_counter(false, None);
+}
+
+#[test]
+fn render_all_frames_when_interactive_is_explicitly_true() {
+    let terminal = testing::TestTerminal::new(100, 24).with_tty(false);
+    let mut app = testing::mount(
+        component(live_counter, ()),
+        Options {
+            interactive: Some(true),
+            ..Options::default()
+        },
+        &terminal,
+    );
+    assert_eq!(Screen::new(&terminal, 100, 24).rows()[0], "Count: 0");
+    for count in 1..=2 {
+        LIVE_COUNT.get().unwrap().set(count);
+        app.advance(Duration::from_millis(50));
+        assert_eq!(
+            Screen::new(&terminal, 100, 24).rows()[0],
+            format!("Count: {count}")
+        );
+    }
+    app.unmount();
+    assert!(terminal.writes().len() > 1);
+    assert!(!terminal.writes().join("").contains("\x1b[?2026"));
+}
+
+#[test]
+fn interactive_option_overrides_tty_detection() {
+    noninteractive_counter(true, Some(false));
+}
+
+#[test]
+fn alternate_screen_enters_on_mount_and_exits_on_unmount() {
+    let terminal = testing::TestTerminal::new(100, 24);
+    testing::mount(
+        Text::new("Hello"),
+        Options {
+            alternate_screen: true,
+            interactive: Some(true),
+            ..Options::default()
+        },
+        &terminal,
+    )
+    .unmount();
+    let writes = terminal.writes();
+    assert!(writes[0].starts_with("\x1b[?1049h"));
+    let exit = writes
+        .iter()
+        .position(|s| s.contains("\x1b[?1049l"))
+        .unwrap();
+    assert!(exit > 0);
+    assert!(writes.join("").ends_with("\x1b[?1049l\x1b[?25h"));
+}
+
+#[test]
+fn alternate_screen_cleanup_exits_the_alternate_screen() {
+    let terminal = testing::TestTerminal::new(100, 24);
+    let app = testing::mount(
+        Text::new("Hello"),
+        Options {
+            alternate_screen: true,
+            ..Options::default()
+        },
+        &terminal,
+    );
+    drop(app);
+    assert!(terminal.writes().join("").contains("\x1b[?1049l"));
+}
+
+fn no_alternate_screen(tty: bool, options: Options) {
+    let terminal = testing::TestTerminal::new(100, 24).with_tty(tty);
+    testing::mount(Text::new("Hello"), options, &terminal).unmount();
+    let output = terminal.writes().join("");
+    assert!(!output.contains("\x1b[?1049h"));
+    assert!(!output.contains("\x1b[?1049l"));
+    if !tty || options.interactive == Some(false) {
+        assert!(!output.contains("\x1b[?2026"));
+    }
+}
+
+#[test]
+fn alternate_screen_ignored_when_non_interactive() {
+    no_alternate_screen(
+        true,
+        Options {
+            alternate_screen: true,
+            interactive: Some(false),
+            ..Options::default()
+        },
+    );
+}
+
+#[test]
+fn alternate_screen_disabled_by_default() {
+    no_alternate_screen(
+        true,
+        Options {
+            interactive: Some(true),
+            ..Options::default()
+        },
+    );
+}
+
+#[test]
+fn alternate_screen_content_is_rendered_between_enter_and_exit() {
+    let terminal = testing::TestTerminal::new(100, 24);
+    testing::mount(
+        Text::new("Hello"),
+        Options {
+            alternate_screen: true,
+            ..Options::default()
+        },
+        &terminal,
+    )
+    .unmount();
+    let writes = terminal.writes();
+    let enter = writes
+        .iter()
+        .position(|s| s.contains("\x1b[?1049h"))
+        .unwrap();
+    let exit = writes
+        .iter()
+        .position(|s| s.contains("\x1b[?1049l"))
+        .unwrap();
+    assert!(enter < exit);
+    assert!(writes[enter + 1..exit].iter().any(|s| s.contains("Hello")));
+}
+
+#[test]
+fn alternate_screen_ignored_when_is_tty_is_false() {
+    no_alternate_screen(
+        false,
+        Options {
+            alternate_screen: true,
+            ..Options::default()
+        },
+    );
+}
+
+#[test]
+fn alternate_screen_ignored_when_is_tty_is_false_even_if_interactive_is_true() {
+    no_alternate_screen(
+        false,
+        Options {
+            alternate_screen: true,
+            interactive: Some(true),
+            ..Options::default()
+        },
+    );
+}
+
+#[test]
+fn static_output_is_written_immediately_in_non_interactive_mode() {
+    fn example(cx: &mut Scope, _: &()) -> Element {
+        let count = cx.use_state(|| 0);
+        LIVE_COUNT.set(Some(count));
+        View::new()
+            .child(Static::new(
+                if count.get() == 0 {
+                    vec!["A"]
+                } else {
+                    vec!["A", "B"]
+                },
+                |item, _| Text::new(*item).key(*item),
+            ))
+            .child(Text::new("Dynamic"))
+            .into()
+    }
+    let terminal = testing::TestTerminal::new(100, 24).with_tty(false);
+    let mut app = testing::mount(component(example, ()), Options::default(), &terminal);
+    LIVE_COUNT.get().unwrap().set(1);
+    app.advance(Duration::from_millis(200));
+    let before = terminal.writes().join("");
+    assert!(before.contains('A'));
+    assert!(before.contains('B'));
+    assert!(!before.contains("Dynamic"));
+    app.unmount();
+    assert!(terminal.writes().join("").contains("Dynamic"));
 }
 
 #[test]

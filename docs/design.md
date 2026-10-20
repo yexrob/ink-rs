@@ -11,7 +11,8 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
  driver     sync │ tokio │ testing
               │ dispatch(event)、render_if_due(now) -> Option<Instant>
  ───────────────────── 核心（步进式，单线程）─────────────────────
- runtime    组件实例树、hooks、按 key 比对、调度、effect、context、焦点
+ app        节流窗口、待绘制状态、终端写入与恢复
+ runtime    组件实例树、hooks、按 key 比对、effect、context、焦点
               │ host 变更：创建 / 改属性 / 插入 / 删除
  host       自有节点树，实现 taffy 的底层 trait，跨帧常驻
  layout     taffy 布局  ←  text：解析、宽度、换行、测量
@@ -27,11 +28,12 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
 |---|---|---|
 | components / hooks | builder 和 `use_*` | `components/`、`hooks/` |
 | driver | 拥有循环和睡眠，把事件交给核心 | `ink.tsx` 的事件接线 |
+| app | 接收驱动解析的模式值，管理节流、输出模式、终端写入与恢复 | `ink.tsx` 的渲染与卸载 |
 | runtime | 组件实例树、按调用顺序存放的 hooks、按 key 比对、调度、effect | `reconciler.ts` |
 | host | 节点存储：View / Text / Static / Transform。自有节点树，实现 taffy 的底层布局 trait，跨帧常驻。Text 里嵌套的 Text、Transform、组件构成行内树，挂在 Text 节点上，taffy 看到的是一个叶子 | `dom.ts` |
 | layout + text | taffy 布局；文本解析、测量、换行、截断、宽字符 | `styles.ts`、`wrap-text.ts` … |
 | paint | 纯函数：节点树 → `Frame`（网格、新增的 Static 行、光标位置），含边框、背景、裁剪、Transform。每帧整帧重画 | `render-node-to-output.ts`、`output.ts` |
-| output | 非全屏 / 全屏两种模式：单元格 diff、Static、光标、同步输出、恢复终端 | `log-update.ts`、`ink.tsx` |
+| output | 单元格 diff、Static、光标、擦除与结束帧字节 | `log-update.ts`、`ink.tsx` |
 | Terminal | 写字节、取尺寸、切换模式 | — |
 
 项目起步是单个 crate，按层分模块：`text`、`host`、`layout`、`paint`、`runtime`、`app`、`output`、`input`、`driver`、`testing`。加过程宏时拆成 workspace。组件库（输入框、列表、spinner）放在单独的 crate，不进 v1。
@@ -69,12 +71,13 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
 - `dispatch(event)` 处理一个事件，`render_if_due(now)` 在需要时渲染一帧，返回下一次需要唤醒的时间 `Option<Instant>`，`None` 表示空闲。驱动按这个时间睡眠，空闲零唤醒由它保证。
 - 核心定义唤醒接口。其他线程经 `AppHandle` 提交更新，或 UI 线程上的任务写 `State`，两种情况通过它叫醒驱动。
 - 调度规则（批量更新、`max_fps`、空闲零唤醒）写在核心里，与驱动无关。测试驱动手动推进循环和假时钟。
+- app 管理节流窗口，runtime 不接收节流参数。Static 有新条目或身份改变时，提交后的绘制满足待绘制帧，但不打开或延长窗口。`max_fps = 0` 使用 0ms 窗口，同 Ink 的非正值分支。
 
 驱动有三个：
 
 - **同步驱动**：UI 线程跑循环，一个线程阻塞读 crossterm 事件。异步结果经 `AppHandle` 送回 UI 线程。
 - **tokio 驱动**（feature `tokio`，默认开启）：UI 循环跑在 `LocalSet` 上，`spawn_local` 派生的任务与 UI 同线程，可以写 `State`。任务句柄 drop 时 abort，组件卸载时任务随之取消。输入用 crossterm 的 `event-stream`。`use_future` 属于这个 feature。
-- **测试驱动**（`testing` 模块）：内存终端，手动推进，传假时间。
+- **测试驱动**（`testing` 模块）：`mount(element, Options, &TestTerminal)` 挂载并运行首步；`advance` 从当前时间开始运行截止时间内的步骤。测试默认 CI=false、Basic 颜色，与 Ink 的测试 helper 一致。`testing::render` 保留不节流的帧记录模式，不添加运行时 debug 选项。
 
 testing 驱动在 M1，同步驱动在 M2，tokio 驱动在 M4。CI 跑一遍 `--no-default-features`，覆盖同步驱动。
 
@@ -123,16 +126,16 @@ M0 的 API（`src/lib.rs`）：
 - **diff 是唯一有状态的部分。** paint 是纯函数，输入节点树和终端尺寸，输出网格，每帧整帧重画；局部重画等有了性能数据再讨论。diff 保存上一帧网格，保证它与屏幕上的内容一致。
 - **按单元格比较。** 逐行比较，变化的行从第一个变化格写到最后一个变化格，起止对齐宽字符边界，样式在变化处切换。行尾不补空格：补出的空格在窗口变窄时会被终端重排成乱行；新内容比旧内容短时用 EL（清到行尾）擦掉余下的格子。写到最后一列之后不写 EL：xterm 在待换行状态下执行 EL 会擦掉最后一格。Ink 默认擦掉整帧重写，增量模式按行从第一个变化列重写到行尾。
 - **光标移动用相对序列。** 行间用 CUU、CUD、CR，新增的行写 `\r\n`，不依赖终端把 `\n` 转成 `\r\n`（raw mode 关掉这个转换）。
-- **同步输出。** 一帧一次 write，`CSI ?2026h` 和 `CSI ?2026l` 在同一个缓冲里；帧没变化时不写任何字节；只在交互式 TTY 上使用。Ink 把这两个序列分成单独的 write。
+- **同步输出。** app 包装 Output 产出的字节。帧、`clear()`、主屏恢复各为一次操作，每次操作一次 write，`CSI ?2026h` 和 `CSI ?2026l` 在同一个缓冲里；无字节时不写同步序列；适用范围为交互式 TTY。卸载前的待绘制帧与恢复是两个操作。备用屏退出不包装同步序列，以 `CSI ?1049l`、`CSI ?25h` 结束，之后不写字节。Ink 把同步序列与帧分成三个 write。
 - **Static 是 host 节点。** 每个实例记住已写出的条目数，长度缩短时降低计数；交给 output 的 `Frame::static_lines` 是本帧新增行，output 不保留 Static 历史。不复刻 Ink 的 index 状态和每次追加的两次提交。输出选择树中第一个 Static，同 Ink；其身份改变时 Frame 通知消费者重置历史。写出及本次提交的 passive effect 结束后，各 Static 卸载本次条目，执行清理，不发起第二次提交；后续 paint 前经过布局。新条目写在帧上方：回到帧顶，写新条目，再写帧，条目随终端滚动进 scrollback。
 - **非全屏模式的规则：不写之后够不着的行。** `Static` 写进 scrollback 一次，此后不改。底部可刷新区域的高度上限是屏高，超出部分从顶部裁掉，不清屏、不整屏重绘。持续增长的内容应放进 `Static`。Ink 不设上限：超高帧整帧写出，下一帧用 `CSI 1;1H CSI J` 清掉可见区重写，每个超高帧把顶部的行往 scrollback 推一遍。两者的可见画面相同，ink-rs 的 scrollback 里没有重复的行。
 - **光标停留的位置**同 Ink：帧比屏幕矮时停在帧下一行的行首；帧高达到屏高时停在最后一行，不写末尾的换行。退出时光标移到帧下方，帧高达到屏高时补一个 `\r\n`，让 shell 提示符从新行开始（Ink 不补）。
-- **全屏模式**即备用屏，启动时由选项决定，运行中不切换。帧从屏幕第一行开始。Static 没有 scrollback 可去，同 Ink 保留全部条目，放在帧上方重放。
+- **全屏模式**即备用屏，启动时由选项决定，运行中不切换。帧从屏幕第一行开始。Static 没有 scrollback 可去，同 Ink 保留全部条目，Static 身份改变时清空历史。每帧取历史末尾至多一个屏高的行，放在 live 行之前，交给 Output 裁剪、差分，不整屏清除，不复制全部历史。
 - **resize** 没有精确解法，各家终端重排行为不同。M2 照 Ink 的规则：宽度变小时按逻辑行擦掉上一帧后重画；高度变小且上一帧占满屏幕时清掉可见区（`CSI 1;1H CSI J`）重画；其余情况走 diff。在真实终端上测过之后再调。
 - **光标**对应 Ink 的 `useCursor`：组件声明光标位置，每帧结束后把真实光标移过去，输入法候选框靠它定位。同 Ink，首帧起隐藏光标；声明了位置时移过去并显示，下一帧开头先隐藏。
-- **非 TTY / CI**：`interactive` 默认取"没有 `CI` 环境变量且 stdout 是 TTY"，选项可以覆盖，同 Ink。非交互时不刷新画面：提交时写新的 Static 条目，退出时写最后一帧加换行。取不到宽度时按 80 列。
+- **非 TTY / CI**：`interactive` 默认取"不在 CI 且 stdout 是 TTY"，选项可以覆盖，同 Ink。非交互时不刷新画面：提交时写新的 Static 条目，退出时写最后一帧加换行。挂载时读取一次尺寸，未知时用 80×24；根宽度为列数。非 TTY 被选项强制为交互模式时不裁剪高度，不视作满屏，不使用同步输出或备用屏。CI 与颜色环境检测归驱动，核心接收解析值。
 - **外部输出**：`use_stdout().write`、`use_stderr().write` 擦掉帧，写出内容，再重画最后一帧，同 Ink 的 `writeToStdout`。不捕获 `println!`：它直接写 fd 1，安全代码拦不住；UI 运行期间改用这两个 write。
-- **恢复终端**：退出、panic、SIGINT / SIGTERM / SIGHUP 时显示光标、退出备用屏、把光标移到帧下方。信号先卸载、恢复，再按原信号退出，同 Ink 的 signal-exit。Ctrl+Z 挂起与 SIGCONT 后重画在 M4。
+- **恢复终端**：退出、panic、SIGINT / SIGTERM / SIGHUP 时显示光标、退出备用屏、把光标移到帧下方。信号先卸载、恢复，再按原信号退出，同 Ink 的 signal-exit。正常卸载先提交未完成工作、写待绘制帧，再运行树清理，最后恢复终端；无待绘制帧时不重画，因此 clear 后卸载不恢复内容。panic 中的 Drop 跳过提交和 paint，先恢复终端再运行清理，避免清理中的 panic 导致 abort 前终端未恢复。Ctrl+Z 挂起与 SIGCONT 后重画在 M4。
 
 ## 输入
 

@@ -2,7 +2,11 @@
 //! Whole-frame comparisons use the recorded expectations. The contains assertions
 //! keep Ink's source literals because the recording lacks them.
 
+mod common;
+
+use ink_rs::Options;
 use std::cell::Cell;
+use std::time::Duration;
 
 use ink_rs::{
     BorderStyle, Element, FlexDirection, Overflow, Scope, State, Static, Styled, Text, View,
@@ -215,6 +219,31 @@ fn static_does_not_affect_layout_tree_coordinates() {
     let mut instance = testing::render(component(example, ()));
     instance.settle();
     assert!(instance.last_frame().contains("Live: 0,0"));
+}
+
+#[test]
+fn calculate_layout_while_rendering_is_throttled() {
+    fn example(cx: &mut Scope, _: &()) -> Element {
+        let width = cx.use_state(|| 0);
+        let node_ref = cx.use_node_ref();
+        cx.use_effect((), move || width.set(measure(node_ref).width));
+        View::new()
+            .node_ref(node_ref)
+            .child(Text::new(format!("Width: {}", width.get())))
+            .into()
+    }
+    let terminal = testing::TestTerminal::new(100, 24);
+    let mut app = testing::mount(
+        Element::fragment(Vec::<Element>::new()),
+        Options::default(),
+        &terminal,
+    );
+    app.rerender(component(example, ()));
+    app.advance(Duration::from_millis(50));
+    assert_eq!(
+        common::Screen::new(&terminal, 100, 24).rows()[0],
+        "Width: 100"
+    );
 }
 
 #[test]
