@@ -41,7 +41,7 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
 - **单元格是内部表示。** text 层把字符串解析成带样式的字素（`StyledChar`），layout、paint、output 处理它。字符串出现在边界：`Text` 的内容、Transform 的参数和返回值、`render_to_string` 的结果、写给终端的字节。
 - **时间由驱动传入。** 核心不读时钟，测试传假时间，不设 Clock 接口。
 - **终端 I/O 经 `Terminal` trait。** 核心写字节、取尺寸、切换模式（raw、备用屏、粘贴、kitty 键盘）；读输入归驱动。crossterm 实现用于生产，内存实现放在 `testing` 模块。
-- **终端恢复用 RAII。** 切换模式时返回 guard；drop、panic hook、SIGTSTP/SIGCONT 共用一份恢复逻辑。
+- **终端恢复用 RAII。** 切换模式时返回 guard；drop、panic hook、终止信号、SIGTSTP/SIGCONT 共用一份恢复逻辑。
 
 ## 编程模型
 
@@ -50,17 +50,17 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
 - **hooks** 按调用顺序存放。debug 构建记录每个位置的类型，顺序变化时 panic 并报出组件名。
 - **状态句柄** `State<T>` 是 `Copy` 的分代句柄（runtime id、槽位、代数），读写经线程局部变量找到当前 runtime，放进闭包无需 clone。UI 运行时单线程、`!Send`，在其他线程使用句柄会 panic；其他线程通过 `Send` 的 `AppHandle` 提交更新。一个线程可以同时运行多个实例。组件卸载后，写它的状态被忽略。
 - **写状态**：`set` 要求 `T: PartialEq`，值相等时不触发渲染；`update(|v| ..)` 表示明确修改，标脏。渲染过程中写状态在 debug 下 panic，派生值用 `use_memo`。
-- **调度**：一轮事件处理完，所有更新合并成一帧，重渲染标脏的组件和 props 变化的子树。更新受 `max_fps` 限制（Ink 默认 30，窗口 34ms），同 Ink：窗口内第一次更新立即渲染，其余合并到窗口结束时渲染；Static 变化、resize、卸载不受限制。
+- **调度**：一轮事件处理完，所有更新合并成一次提交：重渲染标脏的组件和 props 变化的子树、比对、布局、执行 `use_layout_effect`。提交不节流；paint 和写出受 `max_fps` 限制（Ink 默认 30，窗口 34ms），同 Ink：窗口内第一次立即写出，其余合并到窗口结束时写出。Static 有新条目、resize、卸载、外部写、`clear()` 不等窗口。
 - **空闲**：没有变化时零唤醒、零渲染，由测试保证。
-- **effect**：`use_layout_effect` 在布局之后、paint 之前执行，可以读元素尺寸，写状态会让这一帧在写出前重算，一帧写出一次；`use_effect` 在这一帧写到终端之后执行。Ink 在提交时写出，之后执行 layout effect，状态变了写第二帧；ink-rs 不写这个中间帧。清理靠返回值的 `Drop`；组件卸载时它的异步任务随 drop 取消。
+- **effect**：`use_layout_effect` 在布局之后、paint 之前执行，可以读元素尺寸，写状态会让这一帧在写出前重算，一帧写出一次。Ink 在提交时写出，之后执行 layout effect，状态变了写第二帧；ink-rs 不写这个中间帧。`use_effect` 在提交之后执行，这一帧没被节流时在写出之后，同 React：passive effect 跟着提交走，不等节流后的写出。清理靠返回值的 `Drop`；组件卸载时它的异步任务随 drop 取消。
 - **继承的属性**：View 的背景色经内建 context 传给后代 Text，同 Ink 的 `BackgroundContext`。背景色变化时，运行时更新下面受影响的 Text 节点，props 相等的组件不重跑：Ink 中重渲染的是读这个 context 的 Text，不是用户组件。
 - **元素尺寸**：`use_node_ref` 给出句柄，挂到 `View::node_ref`。`measure_element` 返回 x、y（相对根节点）、width、height，以及去掉边框的 client 尺寸，节点未挂载时全为 0。在 effect 和事件回调里读，读到的是最近一次布局。
 
 ### 一帧
 
 1. 驱动调 `dispatch`。按键交给活动的 `use_input` 回调，定时器到期和 `AppHandle` 的消息经同一入口进入。回调写状态，所属组件标脏。
-2. `render_if_due(now)` 到期时：重跑脏组件（props 相等的子树跳过）→ 子元素按 key 比对，产出 host 变更 → taffy 重算 → `use_layout_effect`，写了状态回到第一步 → paint 出 Frame → output 差分写出 → `use_effect`。
-3. 返回下一次唤醒的时间；没有脏组件、没有定时器时返回 `None`。
+2. `render_if_due(now)`：有脏组件时提交：重跑脏组件（props 相等的子树跳过）→ 子元素按 key 比对，产出 host 变更 → taffy 重算 → `use_layout_effect`，写了状态回到第一步。节流窗口允许时 paint 出 Frame → output 差分写出。最后执行 `use_effect`。
+3. 返回下一次唤醒的时间：节流窗口的结束或最近的定时器；没有脏组件、没有待写出的帧、没有定时器时返回 `None`。
 
 ## 事件循环
 
@@ -121,14 +121,18 @@ M0 的 API（`src/lib.rs`）：
 ## 终端输出
 
 - **diff 是唯一有状态的部分。** paint 是纯函数，输入节点树和终端尺寸，输出网格，每帧整帧重画；局部重画等有了性能数据再讨论。diff 保存上一帧网格，保证它与屏幕上的内容一致。
-- **按单元格比较。** 样式在变化处切换。行尾用 EL（清到行尾）代替补空格：补出的空格在窗口变窄时会被终端重排成乱行。
-- **同步输出。** 每帧包在 `CSI ?2026` 里，避免闪烁。
-- **Static 是 host 节点。** output 记住已写出的条目数，只写新条目。不复刻 Ink 的 index 状态和每次追加的两次提交。只跟踪树中第一个 Static，同 Ink。
-- **非全屏模式的规则：不写之后够不着的行。** `Static` 写进 scrollback 一次，此后不改。底部可刷新区域的高度上限是屏高，超出部分从顶部裁掉，不清屏、不整屏重绘。持续增长的内容应放进 `Static`。
-- **resize** 没有精确解法，各家终端重排行为不同，策略在真实终端上测过之后定。
-- **光标**对应 Ink 的 `useCursor`：组件声明光标位置，每帧结束后把真实光标移过去，输入法候选框靠它定位。
-- **非 TTY / CI**：不刷新画面，输出 Static 内容和退出时的最后一帧。
-- **恢复终端**：退出、panic、Ctrl+Z 挂起时恢复终端模式；SIGCONT 后重画。
+- **按单元格比较。** 逐行比较，变化的行从第一个变化格写到最后一个变化格，起止对齐宽字符边界，样式在变化处切换。行尾不补空格：补出的空格在窗口变窄时会被终端重排成乱行；新内容比旧内容短时用 EL（清到行尾）擦掉余下的格子。写到最后一列之后不写 EL：xterm 在待换行状态下执行 EL 会擦掉最后一格。Ink 默认擦掉整帧重写，增量模式按行从第一个变化列重写到行尾。
+- **光标移动用相对序列。** 行间用 CUU、CUD、CR，新增的行写 `\r\n`，不依赖终端把 `\n` 转成 `\r\n`（raw mode 关掉这个转换）。
+- **同步输出。** 一帧一次 write，`CSI ?2026h` 和 `CSI ?2026l` 在同一个缓冲里；帧没变化时不写任何字节；只在交互式 TTY 上使用。Ink 把这两个序列分成单独的 write。
+- **Static 是 host 节点。** output 记住已写出的条目数，只写新条目。不复刻 Ink 的 index 状态和每次追加的两次提交。只跟踪树中第一个 Static，同 Ink。新条目写在帧上方：回到帧顶，写新条目，再写帧，条目随终端滚动进 scrollback。
+- **非全屏模式的规则：不写之后够不着的行。** `Static` 写进 scrollback 一次，此后不改。底部可刷新区域的高度上限是屏高，超出部分从顶部裁掉，不清屏、不整屏重绘。持续增长的内容应放进 `Static`。Ink 不设上限：超高帧整帧写出，下一帧用 `CSI 1;1H CSI J` 清掉可见区重写，每个超高帧把顶部的行往 scrollback 推一遍。两者的可见画面相同，ink-rs 的 scrollback 里没有重复的行。
+- **光标停留的位置**同 Ink：帧比屏幕矮时停在帧下一行的行首；帧高达到屏高时停在最后一行，不写末尾的换行。退出时光标移到帧下方，帧高达到屏高时补一个 `\r\n`，让 shell 提示符从新行开始（Ink 不补）。
+- **全屏模式**即备用屏，启动时由选项决定，运行中不切换。帧从屏幕第一行开始。Static 没有 scrollback 可去，同 Ink 保留全部条目，放在帧上方重放。
+- **resize** 没有精确解法，各家终端重排行为不同。M2 照 Ink 的规则：宽度变小时按逻辑行擦掉上一帧后重画；高度变小且上一帧占满屏幕时清掉可见区（`CSI 1;1H CSI J`）重画；其余情况走 diff。在真实终端上测过之后再调。
+- **光标**对应 Ink 的 `useCursor`：组件声明光标位置，每帧结束后把真实光标移过去，输入法候选框靠它定位。同 Ink，首帧起隐藏光标；声明了位置时移过去并显示，下一帧开头先隐藏。
+- **非 TTY / CI**：`interactive` 默认取"没有 `CI` 环境变量且 stdout 是 TTY"，选项可以覆盖，同 Ink。非交互时不刷新画面：提交时写新的 Static 条目，退出时写最后一帧加换行。取不到宽度时按 80 列。
+- **外部输出**：`use_stdout().write`、`use_stderr().write` 擦掉帧，写出内容，再重画最后一帧，同 Ink 的 `writeToStdout`。不捕获 `println!`：它直接写 fd 1，安全代码拦不住；UI 运行期间改用这两个 write。
+- **恢复终端**：退出、panic、SIGINT / SIGTERM / SIGHUP 时显示光标、退出备用屏、把光标移到帧下方。信号先卸载、恢复，再按原信号退出，同 Ink 的 signal-exit。Ctrl+Z 挂起与 SIGCONT 后重画在 M4。
 
 ## 输入
 
@@ -140,7 +144,7 @@ Ink 的测试是规格，分四层：
 
 1. `render_to_string`：纯函数，M0 的验收。
 2. `testing::render`：对应 ink-testing-library 的 debug 模式，每渲染一帧记录一帧，不节流（M1）。模拟按键在 M3，假时钟随节流在 M2。
-3. 输出字节交给 vt100 模拟器执行，检查屏幕和 scrollback（M2）。
+3. 输出字节交给 vt100 模拟器执行，检查屏幕和 scrollback（M2）。Ink 锁定字节的测试，改为检查 Ink 记录下来的字节在 vt100 上产生的屏幕。vt100 按 char 计算宽度，resize 时不重排、不把行推进 scrollback，待换行状态下的 EL 不擦最后一格；依赖这些行为的测试在真实终端上手动验收。
 4. portable-pty 跑示例程序，测 raw mode、Ctrl+C、退出码、挂起（M3 起）。
 
 各家终端的差异模拟器测不出，要在真实终端上手动验收。
@@ -162,7 +166,7 @@ Ink 的测试是规格，分四层：
 |---|---|---|
 | M0 | View/Text、布局、文本、边框、`render_to_string`；元素是数据，没有运行时 | 移植的 Ink 布局和文本测试通过 |
 | M1 | 组件树、hooks、按 key 比对、调度、元素尺寸测量、测试驱动与 `testing::render` | 断言重渲染次数，空闲时零渲染 |
-| M2 | 两种输出模式、Static 跨帧、`max_fps` 节流、光标、非 TTY、终端恢复、同步驱动 | vt100 场景测试 |
+| M2 | 两种输出模式、Static 跨帧、`max_fps` 节流、光标、非 TTY、外部输出、resize 与 `use_window_size`、终端恢复、同步驱动 | vt100 场景测试 |
 | M3 | 输入、焦点、粘贴、kitty 键盘协议、退出 | PTY 测试 |
 | M4 | 动画、`use_box_metrics`、panic 时的错误界面、挂起恢复、tokio 驱动；移植 Ink 的示例 | 逐个对照示例 |
 | M5 | 宏 DSL、屏幕阅读器模式 | — |
