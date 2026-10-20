@@ -1,15 +1,10 @@
-use std::fs::File;
-use std::io::{self, IsTerminal, Write};
-use std::os::fd::AsFd;
+use std::io::{self, Write};
 use std::panic;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Once, OnceLock, mpsc};
 use std::thread::{self, ThreadId};
 
-use signal_hook::consts::{SIGCONT, SIGHUP, SIGINT, SIGTERM, SIGTSTP, SIGWINCH};
-use signal_hook::iterator::Signals;
-
-use super::{Message, Post, stdin};
+use super::{Message, Post, stdin, sys};
 use crate::terminal::Terminal;
 
 // Release the registry lock before restoration. Lock order is RestoreState ->
@@ -19,8 +14,8 @@ use crate::terminal::Terminal;
 // Join holds lifecycle but neither route nor failure; the reader takes route
 // -> failure only. No user code runs under these locks.
 struct RestoreState {
-    stdout: Option<File>,
-    stderr: Option<File>,
+    stdout: Option<sys::Output>,
+    stderr: Option<sys::Output>,
     bytes: Vec<u8>,
     restored: bool,
     failure: Arc<Mutex<Failure>>,
@@ -92,27 +87,25 @@ impl ProcessTerminal {
             restored: false,
             failure: failure.clone(),
         };
-        // Duplicated fds bypass std::io::Stdout's LineWriter: a synchronized
-        // operation containing newlines reaches File::write_all as one buffer.
-        match io::stdout().as_fd().try_clone_to_owned() {
-            Ok(fd) => state.stdout = Some(File::from(fd)),
+        match sys::stdout() {
+            Ok(output) => state.stdout = Some(output),
             Err(error) => state.record_error(error),
         }
-        match io::stderr().as_fd().try_clone_to_owned() {
-            Ok(fd) => state.stderr = Some(File::from(fd)),
+        match sys::stderr() {
+            Ok(output) => state.stderr = Some(output),
             Err(error) => state.record_error(error),
         }
         Self {
             state: Arc::new(Mutex::new(state)),
-            tty: io::stdout().is_terminal(),
+            tty: sys::stdout_is_tty(),
             input: Arc::new(stdin::Target::new(sender, failure)),
         }
     }
 
     pub(super) fn register(&self, sender: Arc<dyn Post>) -> Registration {
         install_panic_hook();
-        let signals = install_signals();
-        if let Err(error) = signals {
+        let events = sys::install_events(registry().default_signals.clone());
+        if let Err(error) = events {
             self.state
                 .lock()
                 .unwrap()
@@ -126,7 +119,7 @@ impl ProcessTerminal {
             in_loop: AtomicBool::new(false),
         });
         let mut entries = registry().entries.lock().unwrap();
-        if signals.is_ok() {
+        if events.is_ok() {
             entries.push(entry.clone());
             registry().default_signals.store(false, Ordering::SeqCst);
         }
@@ -139,11 +132,11 @@ impl ProcessTerminal {
 
 impl Terminal for ProcessTerminal {
     fn stop_process(&mut self) {
-        let _ = rustix::process::kill_current_process_group(rustix::process::Signal::TSTP);
+        sys::stop_process();
     }
 
     fn stdin_is_tty(&self) -> bool {
-        io::stdin().is_terminal()
+        sys::stdin_is_tty()
     }
 
     fn set_raw_mode(&mut self, enabled: bool) {
@@ -198,9 +191,7 @@ impl Terminal for ProcessTerminal {
     }
 
     fn size(&self) -> Option<(u16, u16)> {
-        rustix::termios::tcgetwinsize(io::stdout())
-            .ok()
-            .map(|size| (size.ws_col, size.ws_row))
+        sys::size()
     }
     fn is_tty(&self) -> bool {
         self.tty
@@ -238,7 +229,7 @@ impl Entry {
 struct Registry {
     entries: Mutex<Vec<Arc<Entry>>>,
     default_signals: Arc<AtomicBool>,
-    termination: Mutex<Option<i32>>,
+    termination: Mutex<Option<sys::Termination>>,
 }
 
 fn registry() -> &'static Registry {
@@ -296,7 +287,7 @@ impl Drop for Registration {
         if entries.is_empty() {
             registry().default_signals.store(true, Ordering::SeqCst);
             if let Some(signal) = *registry().termination.lock().unwrap() {
-                terminate(signal);
+                sys::terminate(signal);
             }
         }
     }
@@ -329,88 +320,57 @@ fn install_panic_hook() {
     });
 }
 
-fn install_signals() -> &'static io::Result<()> {
-    static SIGNALS: OnceLock<io::Result<()>> = OnceLock::new();
-    SIGNALS.get_or_init(|| {
-        // signal-hook retains its OS handler after unregister. Leave conditional
-        // defaults installed, gated by live apps (Ink signal-exit unsubscribes).
-        for signal in [SIGINT, SIGTERM, SIGHUP] {
-            signal_hook::flag::register_conditional_default(
-                signal,
-                registry().default_signals.clone(),
-            )?;
-        }
-        let mut signals = Signals::new([SIGINT, SIGTERM, SIGHUP, SIGWINCH, SIGTSTP, SIGCONT])?;
-        thread::Builder::new()
-            .name("ink-signals".into())
-            .spawn(move || {
-                for signal in signals.forever() {
-                    if signal == SIGTSTP {
-                        // Session-leader groups have no shell to continue them.
-                        // Default TSTP ignores orphaned groups, but emulation uses
-                        // SIGSTOP. A full orphan check needs other processes' parents.
-                        if rustix::process::getsid(None).ok() == Some(rustix::process::getpgrp()) {
-                            continue;
-                        }
-                        let (ack, done) = mpsc::channel::<()>();
-                        {
-                            let entries = registry().entries.lock().unwrap();
-                            for entry in entries.iter() {
-                                // A callback has handed over; the render-to-wait
-                                // gap stops without teardown. Neither has a loop.
-                                if entry.in_loop.load(Ordering::SeqCst) {
-                                    entry.sender.post(Message::Stop(ack.clone()));
-                                }
-                            }
-                        }
-                        drop(ack);
-                        while done.recv().is_ok() {}
-                        let _ = signal_hook::low_level::emulate_default_handler(SIGTSTP);
-                        continue;
-                    }
-                    let entries = registry().entries.lock().unwrap();
-                    if signal == SIGCONT {
-                        for entry in entries.iter() {
-                            entry.sender.post(Message::Continue);
-                        }
-                        continue;
-                    }
-                    if signal == SIGWINCH {
-                        for entry in entries.iter() {
-                            entry.sender.post(Message::Resize);
-                        }
-                        continue;
-                    }
-                    let signal = *registry().termination.lock().unwrap().get_or_insert(signal);
-                    // Publish termination before a registration can disappear,
-                    // then release the registry before taking terminal locks.
-                    let snapshot = entries.clone();
-                    drop(entries);
-                    let entries = snapshot;
-                    if entries.is_empty()
-                        || entries
-                            .iter()
-                            .any(|entry| !entry.in_loop.load(Ordering::SeqCst))
-                    {
-                        // No loop can run cleanups for these apps. Restore every live
-                        // terminal before the process-wide default signal action.
-                        for entry in entries.iter().rev() {
-                            entry.restore(true);
-                        }
-                        terminate(signal);
-                    }
-                    for entry in entries.iter() {
-                        entry.sender.post(Message::Signal);
-                    }
-                }
-            })?;
-        Ok(())
-    })
+pub(super) fn resize() {
+    let entries = registry().entries.lock().unwrap();
+    for entry in entries.iter() {
+        entry.sender.post(Message::Resize);
+    }
 }
 
-pub(super) fn terminate(signal: i32) -> ! {
-    let _ = signal_hook::low_level::emulate_default_handler(signal);
-    // The supported termination signals do not return. Do not resume UI work if
-    // the OS rejects the emulation.
-    signal_hook::low_level::abort();
+pub(super) fn stop() {
+    let (ack, done) = mpsc::channel::<()>();
+    {
+        let entries = registry().entries.lock().unwrap();
+        for entry in entries.iter() {
+            // A callback has handed over; the render-to-wait
+            // gap stops without teardown. Neither has a loop.
+            if entry.in_loop.load(Ordering::SeqCst) {
+                entry.sender.post(Message::Stop(ack.clone()));
+            }
+        }
+    }
+    drop(ack);
+    while done.recv().is_ok() {}
+}
+
+pub(super) fn resume() {
+    let entries = registry().entries.lock().unwrap();
+    for entry in entries.iter() {
+        entry.sender.post(Message::Continue);
+    }
+}
+
+pub(super) fn signal(signal: sys::Termination) {
+    let entries = registry().entries.lock().unwrap();
+    let signal = *registry().termination.lock().unwrap().get_or_insert(signal);
+    // Publish termination before a registration can disappear,
+    // then release the registry before taking terminal locks.
+    let snapshot = entries.clone();
+    drop(entries);
+    let entries = snapshot;
+    if entries.is_empty()
+        || entries
+            .iter()
+            .any(|entry| !entry.in_loop.load(Ordering::SeqCst))
+    {
+        // No loop can run cleanups for these apps. Restore every live
+        // terminal before the process-wide default signal action.
+        for entry in entries.iter().rev() {
+            entry.restore(true);
+        }
+        sys::terminate(signal);
+    }
+    for entry in entries.iter() {
+        entry.sender.post(Message::Signal);
+    }
 }

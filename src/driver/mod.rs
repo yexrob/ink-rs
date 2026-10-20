@@ -13,6 +13,7 @@ use process::{ProcessTerminal, Registration};
 mod environment;
 mod process;
 mod stdin;
+mod sys;
 #[cfg(feature = "tokio")]
 pub mod tokio;
 
