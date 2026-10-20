@@ -40,7 +40,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `colon-colors.tsx` | 16 | M0 | 16 | `tests/colon_colors.rs` |
 | `colorize.ts` | 16 | M0 | 16 | `tests/colorize.rs` |
 | `component-regressions.tsx` | 4 | M1 |  |  |
-| `components.tsx` | 93 | M0 | 37 | `tests/components.rs` |
+| `components.tsx` | 93 | M0 / M1 | 38 | `tests/components.rs` |
 | `content-offset.tsx` | 23 | M0 | 24 | `tests/content_offset.rs` |
 | `cursor-exit-position.tsx` | 6 | M2 |  |  |
 | `cursor-helpers.tsx` | 17 | M2 |  |  |
@@ -89,7 +89,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `position.tsx` | 13 | M0 | 8 | `tests/position.rs` |
 | `reconciler.tsx` | 14 | M1 |  |  |
 | `render-callback.tsx` | 4 | M2 |  |  |
-| `render-to-string.tsx` | 37 | M0 | 28 | `tests/render_to_string.rs` |
+| `render-to-string.tsx` | 37 | M0 / M1 | 32 | `tests/render_to_string.rs` |
 | `render.tsx` | 119 | M2 |  |  |
 | `rendering-regressions.tsx` | 2 | M0 | 2 | `tests/rendering_regressions.rs` |
 | `rerender-input.tsx` | 4 | M3 |  |  |
@@ -99,7 +99,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `static-abandoned-render.tsx` | 1 | — |  |  |
 | `static-blank-lines.tsx` | 9 | M0 | 9 | `tests/static_blank_lines.rs` |
 | `static-runtime-blank-lines.tsx` | 8 | M2 |  |  |
-| `static-string-replacement.tsx` | 4 | M1 |  |  |
+| `static-string-replacement.tsx` | 4 | M1 | 4 | `tests/static_string_replacement.rs` |
 | `static-trailing-layout.tsx` | 7 | M0 | 7 | `tests/static_trailing_layout.rs` |
 | `style-types.ts` | 1 | — |  |  |
 | `style-update-consistency.tsx` | 15 | M1 |  |  |
@@ -139,7 +139,8 @@ Ink 有 95 个测试文件、1,646 个测试。
 
 ### `components.tsx`
 
-- M1：`remeasure text dimensions on text change`、`hooks`、`replace child node with text`、`reset prop when it’s removed from the element`
+- M1 已移植：`hooks`
+- M1：`remeasure text dimensions on text change`、`replace child node with text`、`reset prop when it’s removed from the element`
 - M2，Static 跨帧：`static padding is not emitted again when there are no new items`、`skip previous output when rendering new static output`、`static output stops accumulating after Static unmounts (#904)`、`fullStaticOutput is reset when <Static> unmounts so stale items are not replayed`、`unmounting an ancestor of <Static> clears staticNode and does not crash the renderer`、`removing a <Static> ancestor that is a direct child of the root does not crash`、`separate Ink instances do not clobber each other’s staticNode`、`updating <Static> in one instance after another instance mounted <Static> sets the dirty flag on the correct root`、`remounting <Static> via key change emits the new items (nested under <Box>)`、`remounting <Static> via key change emits the new items (root-level — removeChildFromContainer)`、`render only new items in static output on final render`
 - M2，非 TTY / CI：`render only last frame when run in CI`、`render all frames if CI environment variable equals false`、`debug mode in CI does not replay final frame during unmount teardown`、`debug mode in CI keeps final newline separation after waitUntilExit`、`render only last frame when stdout is not a TTY`、`render all frames when interactive is explicitly true`、`interactive option overrides TTY detection`、`static output is written immediately in non-interactive mode`
 - M2，备用屏幕与卸载：`alternate screen - enters on mount and exits on unmount`、`primary screen - cleanup console output follows the native console during unmount`、`alternate screen - does not replay exit(Error) output on the primary screen during unmount`、`alternate screen - does not replay teardown output on the primary screen during unmount`、`alternate screen - cleanup console output follows the native console during unmount`、`alternate screen - cleanup() exits the alternate screen`、`alternate screen - debug concurrent teardown restores the cursor before the first commit`、`render warns when stdout is reused before unmount`、`alternate screen - ignored when non-interactive`、`alternate screen - disabled by default`、`alternate screen - content is rendered between enter and exit`、`alternate screen - ignored when isTTY is false`、`alternate screen - ignored when isTTY is false even if interactive is true`
@@ -204,7 +205,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 
 ### `render-to-string.tsx`
 
-- M1：`captures initial render output before effect-driven state updates`、`useLayoutEffect state updates are reflected in output`、`runs effect cleanup on teardown`、`runs effect cleanup when a transform throws`
+- M1 已移植：`captures initial render output before effect-driven state updates`、`useLayoutEffect state updates are reflected in output`、`runs effect cleanup on teardown`、`runs effect cleanup when a transform throws`
 - M4：`component that throws propagates the error`、`subsequent calls work after a component error`
 - 不适用：`preserves component errors from another realm`（JS realm）、`component that throws undefined does not silently return empty output`（JS 能抛任意值）、`text outside Text component throws`（Rust 编译期拒绝）
 

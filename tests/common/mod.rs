@@ -20,6 +20,14 @@ use std::fmt::Write as _;
 
 use ink_rs::{ColorLevel, Element, RenderOptions, render_to_string};
 
+pub struct Cleanup(pub fn());
+
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        (self.0)();
+    }
+}
+
 /// Renders the way Ink's test helper does: 100 columns, chalk level 1
 /// (`FORCE_COLOR=true`, sixteen colors).
 pub fn render(element: impl Into<Element>) -> String {

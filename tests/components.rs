@@ -313,6 +313,15 @@ fn transform_with_null_children() {
 }
 
 #[test]
+fn hooks() {
+    fn with_hooks(cx: &mut Scope, _: &()) -> Element {
+        let value = cx.use_state(|| "Hello");
+        Text::new(value.get()).into()
+    }
+    assert_eq!(render(component(with_hooks, ())), "Hello");
+}
+
+#[test]
 fn static_output() {
     let output = render(
         View::new()

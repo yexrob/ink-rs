@@ -2,6 +2,8 @@
 
 mod common;
 
+use std::cell::Cell;
+
 use common::*;
 use ink_rs::*;
 
@@ -260,6 +262,65 @@ fn render_static_dynamic_output_has_exactly_one_newline_between_parts() {
         80,
     );
     assert_eq!(output, lines(&["A", "B", "Dynamic",]));
+}
+
+thread_local! {
+    static DID_CLEANUP_RUN: Cell<bool> = const { Cell::new(false) };
+    static SETUP_COUNT: Cell<usize> = const { Cell::new(0) };
+    static CLEANUP_COUNT: Cell<usize> = const { Cell::new(0) };
+}
+
+#[test]
+fn captures_initial_render_output_before_effect_driven_state_updates() {
+    fn app(cx: &mut Scope, _: &()) -> Element {
+        let text = cx.use_state(|| "Initial");
+        cx.use_effect((), move || text.set("Updated"));
+        Text::new(text.get()).into()
+    }
+    assert_eq!(render_cols(component(app, ()), 80), "Initial");
+}
+
+#[test]
+fn use_layout_effect_state_updates_are_reflected_in_output() {
+    fn app(cx: &mut Scope, _: &()) -> Element {
+        let text = cx.use_state(|| "Initial");
+        cx.use_layout_effect((), move || text.set("Layout Updated"));
+        Text::new(text.get()).into()
+    }
+    assert_eq!(render_cols(component(app, ()), 80), "Layout Updated");
+}
+
+#[test]
+fn runs_effect_cleanup_on_teardown() {
+    DID_CLEANUP_RUN.set(false);
+    fn app(cx: &mut Scope, _: &()) -> Element {
+        cx.use_effect((), || Cleanup(|| DID_CLEANUP_RUN.set(true)));
+        Text::new("Cleanup test").into()
+    }
+    assert_eq!(render_cols(component(app, ()), 80), "Cleanup test");
+    assert!(DID_CLEANUP_RUN.get());
+}
+
+#[test]
+fn runs_effect_cleanup_when_a_transform_throws() {
+    struct TransformFailed;
+    SETUP_COUNT.set(0);
+    CLEANUP_COUNT.set(0);
+    fn test(cx: &mut Scope, _: &()) -> Element {
+        cx.use_layout_effect((), || {
+            SETUP_COUNT.set(SETUP_COUNT.get() + 1);
+            Cleanup(|| CLEANUP_COUNT.set(CLEANUP_COUNT.get() + 1))
+        });
+        Transform::new(|_, _| std::panic::panic_any(TransformFailed))
+            .child(Text::new("Hello"))
+            .into()
+    }
+    let error = std::panic::catch_unwind(|| render_cols(component(test, ()), 80))
+        .expect_err("Transform must panic");
+    assert!(error.is::<TransformFailed>());
+    assert_eq!(SETUP_COUNT.get(), 1);
+    assert_eq!(CLEANUP_COUNT.get(), 1);
+    assert_eq!(render_cols(Text::new("Still works"), 80), "Still works");
 }
 
 #[test]
