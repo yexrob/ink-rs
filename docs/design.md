@@ -36,7 +36,7 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
 | output | 单元格 diff、Static、光标、擦除与结束帧字节 | `log-update.ts`、`ink.tsx` |
 | Terminal | 写字节、取尺寸、切换模式 | — |
 
-项目起步是单个 crate，按层分模块：`text`、`host`、`layout`、`paint`、`runtime`、`app`、`output`、`input`、`driver`、`testing`。加过程宏时拆成 workspace。组件库（输入框、列表、spinner）放在单独的 crate，不进 v1。
+项目起步是单个 crate，按层分模块：`text`、`host`、`layout`、`paint`、`runtime`、`app`、`output`、`input`、`driver`、`testing`。过程宏放在 workspace 成员 `macros`（`ink-rs-macros`），由默认开启的 `macros` feature 引入。组件库（输入框、列表、spinner）放在单独的 crate，不进 v1。
 
 ### 跨层约定
 
@@ -91,7 +91,7 @@ testing 驱动在 M1，同步驱动在 M2，tokio 驱动在 M4。CI 跑一遍 `-
 
 ## 写法
 
-`Box` 与 `std::boxed::Box` 重名，改叫 `View`（同 React Native）。v1 的写法是 builder：rustfmt 能格式化，rust-analyzer 能补全，编译器能检查类型。宏 DSL 放到 M5，作为 builder 的语法糖，能力不超出 builder。
+`Box` 与 `std::boxed::Box` 重名，改叫 `View`（同 React Native）。v1 的写法是 builder：rustfmt 能格式化，rust-analyzer 能补全，编译器能检查类型。宏 DSL 是 `rsx!`，作为 builder 的语法糖，能力不超出 builder：`Name(位置参数, 方法: 值) { 子节点 }` 展开为 `Name::new(..)` 或 `<Name>::default()`，再按顺序调用方法，子节点交给 `child`，`key` 最后调用。没有裸标志，写 `bold: true`。子节点可以是元素、字符串、`{表达式}`、`if`、`for`；含 `{` 的字符串展开为 `format!`。`if` 与 `for` 在语句里串接父 builder，各分支不必同类型。多个根节点合成 `Element::fragment`。
 
 ```rust
 fn counter(cx: &mut Scope, p: &CounterProps) -> Element {

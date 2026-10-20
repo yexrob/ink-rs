@@ -70,6 +70,7 @@ name = "ink-rs"
 version = "0.1.0"
 dependencies = [
  "filedescriptor",
+ "ink-rs-macros",
  "portable-pty",
  "rustix",
  "signal-hook",
@@ -78,6 +79,15 @@ dependencies = [
  "unicode-segmentation",
  "unicode-width",
  "vt100",
+]
+
+[[package]]
+name = "ink-rs-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

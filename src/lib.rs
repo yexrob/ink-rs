@@ -15,6 +15,18 @@
 //! and a clock advanced by the test. [`testing::TestApp::input`] feeds bytes to
 //! active [`Scope::use_input`], [`Scope::use_paste`] and [`Scope::use_focus`] hooks.
 //!
+//! The default `macros` feature provides `rsx!`, syntax sugar for builder trees.
+//!
+//! ```
+//! # #[cfg(feature = "macros")]
+//! # {
+//! use ink_rs::{Text, View, render_to_string, rsx};
+//!
+//! let tree = rsx! { View { Text { "Hello, Ink!" } } };
+//! assert_eq!(render_to_string(tree, Default::default()), "Hello, Ink!");
+//! # }
+//! ```
+//!
 //! On Unix, `render` mounts on process stdout and its `wait_until_exit` blocks
 //! the calling thread. The default `tokio` feature adds `ink_rs::tokio` and
 //! `Scope::use_future` for tasks on a local runtime or `tokio::task::LocalSet`.
@@ -56,6 +68,8 @@ pub use driver::tokio;
 pub use driver::{Instance, render};
 pub use element::{Element, Key, TextChild};
 pub use error::{Error, PanicError, PanicLocation};
+#[cfg(feature = "macros")]
+pub use ink_rs_macros::rsx;
 pub use input::kitty::{KittyFlags, KittyKeyboard};
 pub use input::{KeyEvent, KeyEventType};
 pub use render::{RenderOptions, render_to_string};
