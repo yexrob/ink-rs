@@ -53,7 +53,7 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
 - **调度**：一轮事件处理完，所有更新合并成一帧，重渲染标脏的组件和 props 变化的子树。更新受 `max_fps` 限制（Ink 默认 30，窗口 34ms），同 Ink：窗口内第一次更新立即渲染，其余合并到窗口结束时渲染；Static 变化、resize、卸载不受限制。
 - **空闲**：没有变化时零唤醒、零渲染，由测试保证。
 - **effect**：`use_layout_effect` 在布局之后、paint 之前执行，可以读元素尺寸，写状态会让这一帧在写出前重算，一帧写出一次；`use_effect` 在这一帧写到终端之后执行。Ink 在提交时写出，之后执行 layout effect，状态变了写第二帧；ink-rs 不写这个中间帧。清理靠返回值的 `Drop`；组件卸载时它的异步任务随 drop 取消。
-- **继承的属性**：View 的背景色经内建 context 传给后代 Text，同 Ink 的 `BackgroundContext`。props 相等而继承的值变了的组件，照常重渲染。
+- **继承的属性**：View 的背景色经内建 context 传给后代 Text，同 Ink 的 `BackgroundContext`。背景色变化时，运行时更新下面受影响的 Text 节点，props 相等的组件不重跑：Ink 中重渲染的是读这个 context 的 Text，不是用户组件。
 - **元素尺寸**：`use_node_ref` 给出句柄，挂到 `View::node_ref`。`measure_element` 返回 x、y（相对根节点）、width、height，以及去掉边框的 client 尺寸，节点未挂载时全为 0。在 effect 和事件回调里读，读到的是最近一次布局。
 
 ### 一帧
