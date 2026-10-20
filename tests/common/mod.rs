@@ -410,7 +410,8 @@ fn show(items: &[Item]) -> String {
     out
 }
 
-/// A vt100 screen and scrollback fed from the in-memory app terminal.
+/// A TTY screen and scrollback fed from the in-memory app terminal.
+/// Model OPOST/ONLCR before vt100, which has no terminal line discipline.
 pub struct Screen {
     parser: vt100::Parser,
     columns: u16,
@@ -421,7 +422,7 @@ impl Screen {
     pub fn new(terminal: &ink_rs::testing::TestTerminal, columns: u16, rows: u16) -> Self {
         let mut parser = vt100::Parser::new(rows, columns, 1000);
         for (_, write) in terminal.output() {
-            parser.process(write.as_bytes());
+            parser.process(write.replace('\n', "\r\n").as_bytes());
         }
         Self {
             parser,
@@ -434,7 +435,7 @@ impl Screen {
     pub fn update(&mut self, terminal: &ink_rs::testing::TestTerminal) {
         let output = terminal.output();
         for (_, write) in &output[self.writes..] {
-            self.parser.process(write.as_bytes());
+            self.parser.process(write.replace('\n', "\r\n").as_bytes());
         }
         self.writes = output.len();
     }

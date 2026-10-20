@@ -205,17 +205,10 @@ impl AppOutput {
             bytes.extend_from_slice(b"\x1b[?2026h");
         }
         self.output.clear(&mut bytes);
-        // crossterm raw mode clears OPOST. Redraw needs column zero on a new
-        // row, including when data has no final newline (unlike Ink's streams).
-        let mut data_bytes = Vec::with_capacity(data.len() + 2);
-        let mut previous = None;
-        for byte in data.bytes() {
-            if byte == b'\n' && previous != Some(b'\r') {
-                data_bytes.push(b'\r');
-            }
-            data_bytes.push(byte);
-            previous = Some(byte);
-        }
+        // libuv-style raw mode preserves OPOST and enables ONLCR: leave data
+        // newlines to the TTY. Unlike Ink, add a final line break when absent
+        // because cell-diff redraw starts at column zero on the following row.
+        let mut data_bytes = data.as_bytes().to_vec();
         if !data.ends_with('\n') {
             data_bytes.extend_from_slice(b"\r\n");
         }

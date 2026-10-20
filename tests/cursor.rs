@@ -213,7 +213,7 @@ fn cursor_remains_visible_after_use_stderr_write() {
         &terminal,
     );
     app.advance(Duration::from_millis(50));
-    assert_eq!(terminal.stderr(), ["from stderr hook\r\n"]);
+    assert_eq!(terminal.stderr(), ["from stderr hook\n"]);
     assert_cursor(&terminal, 24, 1, 2);
 }
 
