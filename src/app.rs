@@ -13,6 +13,9 @@ use crate::{
     WindowSize,
 };
 
+#[cfg(test)]
+mod tests;
+
 /// Options for a live app, including [`crate::testing::mount`].
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
@@ -316,6 +319,7 @@ impl App {
         color_level: ColorLevel,
         now: Instant,
     ) -> Self {
+        crate::runtime::panic::install();
         let size = WindowSize::resolve(terminal.size());
         let WindowSize { columns, rows } = size;
         let tty = terminal.is_tty();
@@ -332,6 +336,7 @@ impl App {
             },
         );
         runtime.resize(size);
+        runtime.catch = true;
         runtime.exit_on_ctrl_c = options.exit_on_ctrl_c;
         let destination = Rc::new(RefCell::new(AppOutput {
             output: Output::new(),
@@ -417,7 +422,14 @@ impl App {
         runtime.tick_animations(now, self.window);
         runtime.flush_input(now);
         runtime.queue().drain();
-        let commit = runtime.has_work().then(|| runtime.commit());
+        let commit = runtime.has_work().then(|| {
+            let commit = runtime.commit();
+            if Self::report_panic(runtime) {
+                runtime.commit()
+            } else {
+                commit
+            }
+        });
         if commit.is_some() {
             self.pending = true;
         }
@@ -443,6 +455,7 @@ impl App {
             runtime.after_write();
             self.pending |= cursor != runtime.cursor();
         }
+        Self::report_panic(runtime);
         let stdin_tty = self.destination.borrow().terminal.stdin_is_tty();
         let holders = runtime.input_holders();
         // Ink use-focus.ts skips setRawMode on unsupported stdin, unlike
@@ -514,6 +527,22 @@ impl App {
         self.pending = false;
     }
 
+    fn report_panic(runtime: &mut Runtime) -> bool {
+        let Some(error) = runtime.take_panic() else {
+            return false;
+        };
+        // Ink ErrorBoundary renders ErrorOverview before handleExit unmounts.
+        runtime.rerender(crate::error_overview::build(
+            error.message(),
+            error
+                .location()
+                .map(|location| (location.file.as_str(), location.line, location.column)),
+            error.backtrace().as_deref(),
+        ));
+        runtime.queue().request_failure(crate::Error::Panic(error));
+        true
+    }
+
     pub(crate) fn clear(&mut self) {
         if self.runtime.is_some() {
             self.destination.borrow_mut().clear();
@@ -532,7 +561,7 @@ impl App {
         if std::thread::panicking() {
             // Cleanup runs user code: a second panic aborts the process, so
             // restore before dropping the tree rather than Ink's normal order.
-            self.runtime.as_ref().unwrap().begin_unmount();
+            self.runtime.as_mut().unwrap().begin_unmount();
             self.destination.borrow_mut().restore(Vec::new());
             drop(self.runtime.take());
             return;
@@ -542,6 +571,9 @@ impl App {
         let committed = runtime.has_work();
         if committed {
             runtime.commit();
+            if Self::report_panic(runtime) {
+                runtime.commit();
+            }
             self.pending = true;
         }
         if self.interactive {

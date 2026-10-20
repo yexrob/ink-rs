@@ -339,6 +339,11 @@ impl TestApp {
         self.app.exit_result()
     }
 
+    /// Takes the exit result, including an owned exit value or panic payload.
+    pub fn take_exit_result(&mut self) -> Option<Result<Option<Box<dyn Any + Send>>, Error>> {
+        self.app.take_exit_result()
+    }
+
     /// Reconciles the root and runs a step at the current clock time.
     pub fn rerender(&mut self, element: impl Into<Element>) {
         self.app.rerender(element.into());

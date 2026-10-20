@@ -1,6 +1,6 @@
 use std::any::{Any, TypeId, type_name};
 use std::cell::Cell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use taffy::{NodeId, Point};
 
 use crate::element::Node;
+use crate::error::PanicError;
 use crate::host::{self, HostNode, HostTree, Inline, LineTransform, TextNode};
 use crate::text::styled;
 use crate::{
@@ -24,6 +25,7 @@ mod focus;
 mod hooks;
 mod input;
 mod output;
+pub(crate) mod panic;
 mod state;
 
 #[cfg(test)]
@@ -157,15 +159,16 @@ impl Dirty {
 
 #[derive(Default)]
 struct Cleanups {
-    insertion: Vec<Box<dyn Any>>,
+    insertion: VecDeque<Box<dyn Any>>,
     refs: Vec<(NodeId, Option<NodeRef>)>,
-    layout: Vec<Box<dyn Any>>,
-    passive: Vec<Box<dyn Any>>,
-    states: Vec<Box<dyn Any>>,
+    layout: VecDeque<Box<dyn Any>>,
+    passive: VecDeque<Box<dyn Any>>,
+    states: VecDeque<Box<dyn Any>>,
 }
 
-fn drain(values: &mut Vec<Box<dyn Any>>) {
-    for value in values.drain(..) {
+fn drain(values: &mut VecDeque<Box<dyn Any>>) {
+    // Retain the remaining cleanups if one destructor unwinds.
+    while let Some(value) = values.pop_front() {
         drop(value);
     }
 }
@@ -176,7 +179,7 @@ struct Instance {
     host: Option<NodeId>,
     node_ref: Option<NodeRef>,
     hooks: Vec<Hook>,
-    insertion_deletions: Vec<Box<dyn Any>>,
+    insertion_deletions: VecDeque<Box<dyn Any>>,
     rendered: bool,
     dirty: Rc<Dirty>,
     background: Option<Color>,
@@ -204,7 +207,7 @@ impl Instance {
             host: None,
             node_ref: None,
             hooks: Vec::new(),
-            insertion_deletions: Vec::new(),
+            insertion_deletions: VecDeque::new(),
             rendered: false,
             dirty: Dirty::new(parent),
             background: None,
@@ -234,19 +237,19 @@ impl Instance {
             match hook.value {
                 Value::WindowSize => {}
                 Value::NodeRef { slot, .. } => drop(slot),
-                Value::State { slot, .. } => cleanups.states.push(Box::new(slot)),
+                Value::State { slot, .. } => cleanups.states.push_back(Box::new(slot)),
                 Value::Effect(mut effect) => {
                     if let Some(cleanup) = effect.cleanup.take() {
                         if hook.kind == Kind::InsertionEffect {
-                            cleanups.insertion.push(cleanup);
+                            cleanups.insertion.push_back(cleanup);
                         } else if matches!(hook.kind, Kind::LayoutEffect(_)) {
-                            cleanups.layout.push(cleanup);
+                            cleanups.layout.push_back(cleanup);
                         } else {
-                            cleanups.passive.push(cleanup);
+                            cleanups.passive.push_back(cleanup);
                         }
                     }
                 }
-                Value::Memo(value) => cleanups.states.push(value),
+                Value::Memo(value) => cleanups.states.push_back(value),
             }
         }
         for child in &mut self.children {
@@ -254,7 +257,7 @@ impl Instance {
         }
     }
 
-    fn collect_cleanups(&mut self, layout: bool, cleanups: &mut Vec<Box<dyn Any>>) {
+    fn collect_cleanups(&mut self, layout: bool, cleanups: &mut VecDeque<Box<dyn Any>>) {
         // React commitHookEffectListUnmount handles updates child before parent.
         for child in &mut self.children {
             child.collect_cleanups(layout, cleanups);
@@ -266,7 +269,7 @@ impl Instance {
                 && effect.setup.is_some()
                 && let Some(cleanup) = effect.cleanup.take()
             {
-                cleanups.push(cleanup);
+                cleanups.push_back(cleanup);
             }
         }
     }
@@ -371,6 +374,9 @@ pub(crate) struct Runtime {
     static_changed: bool,
     layout_pending: bool,
     pub(crate) exit_on_ctrl_c: bool,
+    pub(crate) catch: bool,
+    panic: Option<PanicError>,
+    overview: bool,
 }
 
 impl Runtime {
@@ -411,6 +417,9 @@ impl Runtime {
             static_changed: false,
             layout_pending: false,
             exit_on_ctrl_c: true,
+            catch: false,
+            panic: None,
+            overview: false,
         }
     }
 
@@ -440,7 +449,8 @@ impl Runtime {
         self.instance.store.cursor.get()
     }
 
-    pub(crate) fn begin_unmount(&self) {
+    pub(crate) fn begin_unmount(&mut self) {
+        self.catch = false;
         // Ink sets isUnmounted before React runs teardown cleanups.
         self.instance.store.unmounting.set(true);
         self.instance.store.queue.close();
@@ -472,23 +482,65 @@ impl Runtime {
         self.layout_pending || self.next.is_some() || self.instance.dirty.pending()
     }
 
+    pub(crate) fn take_panic(&mut self) -> Option<PanicError> {
+        let panic = self.panic.take();
+        self.overview |= panic.is_some();
+        panic
+    }
+
+    /// `rethrow` is true for regions that render the overview itself. A panic
+    /// there while the overview is mounted is resumed so a broken overview cannot loop.
+    fn guard(&mut self, rethrow: bool, f: impl FnOnce(&mut Self)) -> bool {
+        match panic::guard(self.catch, || f(self)) {
+            Ok(()) => true,
+            Err(error) => {
+                if self.overview && rethrow {
+                    std::panic::resume_unwind(error.into_payload());
+                }
+                if self.panic.is_none() && !self.overview {
+                    self.panic = Some(error);
+                }
+                false
+            }
+        }
+    }
+
+    fn abandon(&mut self) {
+        // Ink ErrorBoundary replaces the user tree; never render a subtree
+        // whose reconciliation or effect group unwound.
+        self.next = Some(if self.overview {
+            self.instance.element.clone()
+        } else {
+            Element::fragment(Vec::<Element>::new())
+        });
+    }
+
     pub(crate) fn commit(&mut self) -> Commit {
         self.layout_pending = false;
         for round in 0..50 {
-            {
+            if !self.guard(true, |runtime| {
                 let _guard = RenderGuard::enter();
                 reconcile(
-                    &mut self.instance,
-                    self.next.take(),
+                    &mut runtime.instance,
+                    runtime.next.take(),
                     false,
                     None,
-                    &mut self.tree,
-                    self.options.color_level,
-                    &mut self.cleanups,
+                    &mut runtime.tree,
+                    runtime.options.color_level,
+                    &mut runtime.cleanups,
                 );
-                order_children(&mut self.tree, self.root, &self.instance.children);
+                order_children(&mut runtime.tree, runtime.root, &runtime.instance.children);
+            }) {
+                self.abandon();
+                continue;
             }
-            self.instance.insertion_effects();
+            if !self.guard(false, |runtime| {
+                drain(&mut runtime.cleanups.insertion);
+                runtime.instance.insertion_effects();
+            }) {
+                self.abandon();
+                continue;
+            }
             // React commitMutationEffects detaches old refs before
             // commitLayoutEffects attaches refs and runs layout effects.
             for (node, _) in &self.cleanups.refs {
@@ -499,11 +551,21 @@ impl Runtime {
             for (node, node_ref) in self.cleanups.refs.drain(..) {
                 if let Some(node_ref) = node_ref {
                     self.refs.insert(usize::from(node), node_ref);
+                } else {
+                    // A failed render can attach and retire a ref in the same
+                    // commit. Do not measure its freed host node.
+                    self.refs.remove(&usize::from(node));
                 }
             }
-            self.instance
-                .collect_cleanups(true, &mut self.cleanups.layout);
-            drain(&mut self.cleanups.layout);
+            if !self.guard(false, |runtime| {
+                runtime
+                    .instance
+                    .collect_cleanups(true, &mut runtime.cleanups.layout);
+                drain(&mut runtime.cleanups.layout);
+            }) {
+                self.abandon();
+                continue;
+            }
             {
                 let _guard = RenderGuard::enter();
                 layout::compute(&mut self.tree, self.root);
@@ -548,7 +610,10 @@ impl Runtime {
             // Ink's root layout listeners also reach memoized readers. Refs
             // are attached here, so no passive effect or microtask is needed.
             self.instance.store.check_box_readers();
-            self.instance.effects(true);
+            if !self.guard(true, |runtime| runtime.instance.effects(true)) {
+                self.abandon();
+                continue;
+            }
             if !self.instance.dirty.pending() {
                 break;
             }
@@ -581,11 +646,17 @@ impl Runtime {
     }
 
     pub(crate) fn passive_effects(&mut self) {
-        self.instance
-            .collect_cleanups(false, &mut self.cleanups.passive);
-        drain(&mut self.cleanups.passive);
-        drain(&mut self.cleanups.states);
-        self.instance.effects(false);
+        self.guard(false, |runtime| {
+            runtime
+                .instance
+                .collect_cleanups(false, &mut runtime.cleanups.passive);
+            drain(&mut runtime.cleanups.passive);
+            drain(&mut runtime.cleanups.states);
+            // A failed render must not mount effects in its abandoned tree.
+            if runtime.panic.is_none() {
+                runtime.instance.effects(false);
+            }
+        });
     }
 
     pub(crate) fn after_write(&mut self) {
@@ -594,15 +665,17 @@ impl Runtime {
         if self.instance.pending_static {
             self.instance
                 .finish_static(&mut self.tree, &mut self.cleanups);
-            drain(&mut self.cleanups.insertion);
-            for (node, _) in self.cleanups.refs.drain(..) {
-                if let Some(node_ref) = self.refs.remove(&usize::from(node)) {
-                    node_ref.refresh(None);
+            self.guard(false, |runtime| {
+                drain(&mut runtime.cleanups.insertion);
+                for (node, _) in runtime.cleanups.refs.drain(..) {
+                    if let Some(node_ref) = runtime.refs.remove(&usize::from(node)) {
+                        node_ref.refresh(None);
+                    }
                 }
-            }
-            drain(&mut self.cleanups.layout);
-            drain(&mut self.cleanups.passive);
-            drain(&mut self.cleanups.states);
+                drain(&mut runtime.cleanups.layout);
+                drain(&mut runtime.cleanups.passive);
+                drain(&mut runtime.cleanups.states);
+            });
             // Host mutations invalidate layout caches. paint computes layout
             // even without a commit, as on Ink's non-interactive final render.
         }

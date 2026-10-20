@@ -101,6 +101,10 @@ impl Instance {
     /// for `exit_with(value)`, and `Err(Error::App(error))` for
     /// `exit_with_error(error)`. Terminal I/O failures, including a closed
     /// stdout pipe, return `Err(Error::Io(error))`.
+    /// Component and live-effect panics return `Err(Error::Panic(error))`
+    /// after displaying an overview and restoring the terminal.
+    /// Call `std::panic::resume_unwind(error.into_payload())` to resume the
+    /// panic with exit code 101. `panic = "abort"` cannot be caught.
     ///
     /// To end a blocked wait from another thread, take an [`Instance::handle`]
     /// before waiting and call [`AppHandle::exit`] on it.

@@ -1,4 +1,4 @@
-//! Ink test/exit.tsx, test/hooks.tsx and test/render.tsx @ 26d2c3f.
+//! Ink 8.0.0 test/exit.tsx, test/hooks.tsx and test/render.tsx, commit 26d2c3f.
 //! One executable serves as harness and fixture so Cargo builds both together.
 use std::io::{self, Read, Write};
 #[cfg(target_os = "macos")]
@@ -30,6 +30,9 @@ enum Case {
     Raw,
     RawError,
     RawUnmount,
+    Thrown,
+    ThrownCoreFirst,
+    NestedPanic,
     Alive,
     CtrlC,
     Pipe,
@@ -60,6 +63,11 @@ const CASES: &[(Case, &str, &str)] = &[
         "raw-unmount",
         "exit on unmount() with raw mode",
     ),
+    (
+        Case::Thrown,
+        "exit-with-thrown-error",
+        "exit with thrown error",
+    ),
     (Case::Alive, "alive", "don’t exit while raw mode is active"),
     (
         Case::CtrlC,
@@ -80,6 +88,16 @@ const CASES: &[(Case, &str, &str)] = &[
         Case::AnimationNonInteractive,
         "use-animation-interactive-false-exit",
         "useAnimation can drive explicitly non-interactive process exit",
+    ),
+    (
+        Case::ThrownCoreFirst,
+        "panic-core-hook-first",
+        "caught panic with core hook installed first",
+    ),
+    (
+        Case::NestedPanic,
+        "panic-during-unwind",
+        "destructor panic restores before abort",
     ),
 ];
 
@@ -208,15 +226,43 @@ fn stdin_termios() -> Result<Termios> {
     Ok(tcgetattr(io::stdin())?)
 }
 
+fn nested_panic(cx: &mut Scope, fail: &bool) -> Element {
+    struct BrokenDrop;
+    impl Drop for BrokenDrop {
+        fn drop(&mut self) {
+            panic!("nested destructor failure");
+        }
+    }
+    cx.use_input(true, |_, _| {});
+    if *fail {
+        let _cleanup = BrokenDrop;
+        panic!("outer component failure");
+    }
+    Text::new("raw mode active").into()
+}
+
 fn fixture(case: Case) -> Result {
-    let before = (case == Case::Raw).then(stdin_termios).transpose()?;
+    if case == Case::ThrownCoreFirst {
+        let terminal = ink_rs::testing::TestTerminal::new(100, 24);
+        ink_rs::testing::mount(
+            Text::new("install core hook"),
+            Options::default(),
+            &terminal,
+        )
+        .unmount();
+    }
+    let before = matches!(case, Case::Raw | Case::Thrown | Case::ThrownCoreFirst)
+        .then(stdin_termios)
+        .transpose()?;
     let element = match case {
         Case::Normal => Text::new("Hello World").into(),
+        Case::Thrown | Case::ThrownCoreFirst => component(|_, _: &()| panic!("errored"), ()),
+        Case::NestedPanic => component(nested_panic, false),
         Case::Pipe => Text::new("ready-stdin-not-tty").into(),
         Case::AnimationPipe | Case::AnimationNonInteractive => component(animation_exit, ()),
         _ => component(example, case),
     };
-    let app = render(
+    let mut app = render(
         element,
         Options {
             exit_on_ctrl_c: case != Case::CtrlC,
@@ -224,6 +270,10 @@ fn fixture(case: Case) -> Result {
             ..Options::default()
         },
     );
+    if case == Case::NestedPanic {
+        app.rerender(component(nested_panic, true));
+        return Err("nested panic did not abort".into());
+    }
     if matches!(case, Case::Unmount | Case::RawUnmount) {
         let handle = app.handle();
         thread::spawn(move || {
@@ -237,6 +287,9 @@ fn fixture(case: Case) -> Result {
         io::stdout().flush()?;
     }
     match app.wait_until_exit() {
+        Err(Error::Panic(error)) if matches!(case, Case::Thrown | Case::ThrownCoreFirst) => {
+            println!("{error}")
+        }
         Err(Error::App(error)) if matches!(case, Case::Error | Case::RawError) => {
             println!("{error}")
         }
@@ -298,7 +351,7 @@ fn collect(mut reader: impl Read + Send + 'static) -> mpsc::Receiver<io::Result<
 fn assert_output(case: Case, output: &[u8]) -> Result {
     let output = String::from_utf8_lossy(output);
     let marker = match case {
-        Case::Error | Case::RawError => "errored",
+        Case::Error | Case::RawError | Case::Thrown | Case::ThrownCoreFirst => "errored",
         Case::Value => "result:hello from ink",
         Case::Object => "result:hello from ink object",
         Case::Pipe => "ready-stdin-not-tty",
@@ -307,8 +360,20 @@ fn assert_output(case: Case, output: &[u8]) -> Result {
     if !output.contains(marker) || !output.contains("exited") {
         return Err(format!("missing {marker:?} or exited in {output:?}").into());
     }
-    if case == Case::Raw && !output.contains("termios-restored") {
+    if matches!(case, Case::Raw | Case::Thrown | Case::ThrownCoreFirst)
+        && !output.contains("termios-restored")
+    {
         return Err("missing termios restoration marker".into());
+    }
+    if matches!(case, Case::Thrown | Case::ThrownCoreFirst) {
+        let mut parser = vt100::Parser::new(24, 100, 1000);
+        parser.process(output.as_bytes());
+        if !parser.screen().contents().contains("ERROR") || parser.screen().hide_cursor() {
+            return Err(format!("missing overview or cursor restoration: {output:?}").into());
+        }
+        if output.contains("panicked at") {
+            return Err("std panic output escaped the boundary".into());
+        }
     }
     Ok(())
 }
@@ -323,6 +388,7 @@ fn run_pty(case: Case, id: &str) -> Result {
     let mut command = CommandBuilder::new(std::env::current_exe()?);
     command.env(FIXTURE, id);
     command.env("TERM", "xterm-256color");
+    command.env("RUST_LIB_BACKTRACE", "0");
     command.env_remove("CI");
     command.env_remove("CONTINUOUS_INTEGRATION");
     let reader = pair.master.try_clone_reader()?;
@@ -375,6 +441,21 @@ fn run_pty(case: Case, id: &str) -> Result {
                 }
             }
             if closed && let Some(status) = &status {
+                if case == Case::NestedPanic {
+                    let output = String::from_utf8_lossy(&output);
+                    let mut parser = vt100::Parser::new(24, 100, 0);
+                    parser.process(output.as_bytes());
+                    if status.success()
+                        || !output.contains("nested destructor failure")
+                        || parser.screen().hide_cursor()
+                    {
+                        return Err(format!(
+                            "nested panic failed to restore and abort: {output:?}"
+                        )
+                        .into());
+                    }
+                    return Ok(());
+                }
                 if !status.success() {
                     return Err(format!(
                         "child status {status:?}; output: {:?}",

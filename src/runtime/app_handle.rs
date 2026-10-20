@@ -8,6 +8,7 @@ use crate::Error;
 /// Retaining a handle keeps a live driver running until an exit request.
 /// Drop handles when their work ends so the app can reach its natural end.
 /// The first exit request wins; requests after unmount begins are ignored.
+/// A caught component panic replaces a pending successful exit.
 /// Exit methods wake the driver; teardown happens in the next app step.
 pub struct AppHandle {
     queue: Arc<UpdateQueue>,
@@ -83,6 +84,20 @@ pub(crate) struct UpdateQueue {
 }
 
 impl UpdateQueue {
+    pub(crate) fn request_failure(&self, error: Error) {
+        let mut state = self.state.lock().unwrap();
+        let previous = if !state.closed && !matches!(state.exit, Some(Err(_))) {
+            let previous = state.exit.replace(Err(error));
+            self.wake(&state);
+            previous
+        } else {
+            Some(Err(error))
+        };
+        drop(state);
+        // A displaced exit value can run user code in Drop.
+        drop(previous);
+    }
+
     pub(crate) fn request_exit(&self, request: ExitResult) {
         let mut state = self.state.lock().unwrap();
         if !state.closed && state.exit.is_none() {

@@ -48,6 +48,7 @@ impl OutputWriter {
     /// Writes to the selected stream and restores the last painted frame.
     /// Empty writes and writes after app teardown begins are ignored.
     /// Panics in debug builds during render. Without a driver, writes are dropped.
+    #[track_caller]
     pub fn write(self, data: &str) {
         assert_eq!(
             self.thread,

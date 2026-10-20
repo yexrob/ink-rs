@@ -1,4 +1,4 @@
-//! Ported from ink test/render.tsx @ 26d2c3f.
+//! Ported from Ink 8.0.0 test/render.tsx, commit 26d2c3f.
 mod common;
 
 use common::{Screen, assert_no_full_clear};
@@ -548,6 +548,19 @@ fn unmount_forces_pending_throttled_render() {
     assert_eq!(terminal.writes().len(), 1);
     app.unmount();
     assert_eq!(nonempty(&terminal, 24), ["Final"]);
+}
+
+#[test]
+fn should_reject_wait_until_exit_when_app_exits_during_synchronous_render_error_handling() {
+    fn broken(_: &mut Scope, _: &()) -> Element {
+        panic!("Synchronous render error");
+    }
+    let terminal = TestTerminal::new(100, 40);
+    let app = mount(component(broken, ()), Options::default(), &terminal);
+    let Some(Err(Error::Panic(error))) = app.exit_result() else {
+        panic!("expected first-step panic result");
+    };
+    assert_eq!(error.message(), "Synchronous render error");
 }
 
 #[test]

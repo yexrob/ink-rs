@@ -144,6 +144,7 @@ pub(super) fn resolve_store(id: u64) -> Option<Rc<Store>> {
     REGISTRY.with(|registry| registry.borrow().get(&id).and_then(Weak::upgrade))
 }
 
+#[track_caller]
 pub(super) fn assert_not_rendering() {
     debug_assert!(
         RENDER_DEPTH.with(|depth| depth.get() == 0),
@@ -310,6 +311,7 @@ impl<T> Clone for State<T> {
 }
 
 impl<T: 'static> State<T> {
+    #[track_caller]
     fn resolve(self) -> Option<Rc<StateValue>> {
         assert_eq!(
             self.thread,
@@ -325,6 +327,7 @@ impl<T: 'static> State<T> {
     }
 
     /// Reads the current value. Panics after the owner unmounts.
+    #[track_caller]
     pub fn get(self) -> T
     where
         T: Clone,
@@ -337,6 +340,7 @@ impl<T: 'static> State<T> {
     }
 
     /// Replaces the value, scheduling its owner when the value differs.
+    #[track_caller]
     pub fn set(self, next: T)
     where
         T: PartialEq,
@@ -363,6 +367,7 @@ impl<T: 'static> State<T> {
     }
 
     /// Mutates the value and schedules its owner, without an equality check.
+    #[track_caller]
     pub fn update(self, f: impl FnOnce(&mut T)) {
         assert_not_rendering();
         let Some(value) = self.resolve() else { return };

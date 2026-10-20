@@ -52,6 +52,7 @@ impl FocusManager {
         }
     }
 
+    #[track_caller]
     fn store(self) -> Option<Rc<Store>> {
         assert_eq!(
             self.thread,
@@ -61,6 +62,7 @@ impl FocusManager {
         resolve_store(self.runtime).filter(|store| !store.unmounting.get())
     }
 
+    #[track_caller]
     fn update(self, f: impl FnOnce(&mut FocusState)) {
         assert_not_rendering();
         if let Some(store) = self.store() {
@@ -70,12 +72,14 @@ impl FocusManager {
 
     /// Enables Tab, Esc and registration-time autofocus (enabled by default).
     /// Does not restore the focus cleared by [`Self::disable_focus`].
+    #[track_caller]
     pub fn enable_focus(self) {
         self.update(|focus| focus.enabled = true);
     }
 
     /// Disables Tab, Esc and registration-time autofocus, and clears focus.
     /// Explicit focus and navigation methods remain available, as in Ink.
+    #[track_caller]
     pub fn disable_focus(self) {
         self.update(|focus| {
             focus.enabled = false;
@@ -87,6 +91,7 @@ impl FocusManager {
     /// With no focus, selects the first active ID. Keyed moves do not change
     /// registration order; duplicate IDs use their first entry's active flag.
     /// Does not check whether keyboard focus management is enabled.
+    #[track_caller]
     pub fn focus_next(self) {
         self.update(|focus| focus.navigate(false));
     }
@@ -94,12 +99,14 @@ impl FocusManager {
     /// Selects the previous active ID in registration order, wrapping to the last.
     /// With no focus, selects the last active ID, matching Ink's implementation.
     /// Duplicate IDs use their first entry. Works when focus management is disabled.
+    #[track_caller]
     pub fn focus_previous(self) {
         self.update(|focus| focus.navigate(true));
     }
 
     /// Focuses `id` if any entry with that ID is active; otherwise leaves focus
     /// unchanged. Accepts an empty ID and works when focus management is disabled.
+    #[track_caller]
     pub fn focus(self, id: &str) {
         self.update(|focus| {
             if focus
@@ -114,6 +121,7 @@ impl FocusManager {
 
     /// Reads the live focused ID, or `None` before focus is assigned or after
     /// teardown. Unlike Ink's render snapshot, handlers see preceding mutations.
+    #[track_caller]
     pub fn active_id(self) -> Option<String> {
         self.store()
             .and_then(|store| store.focus.borrow().active.clone())

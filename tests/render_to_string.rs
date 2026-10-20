@@ -1,4 +1,4 @@
-//! Ported from ink test/render-to-string.tsx @ 26d2c3f.
+//! Ported from Ink 8.0.0 test/render-to-string.tsx, commit 26d2c3f.
 
 mod common;
 
@@ -320,6 +320,24 @@ fn runs_effect_cleanup_when_a_transform_throws() {
     assert!(error.is::<TransformFailed>());
     assert_eq!(SETUP_COUNT.get(), 1);
     assert_eq!(CLEANUP_COUNT.get(), 1);
+    assert_eq!(render_cols(Text::new("Still works"), 80), "Still works");
+}
+
+#[test]
+fn component_that_throws_propagates_the_error() {
+    fn broken(_: &mut Scope, _: &()) -> Element {
+        panic!("Component error");
+    }
+    let error = std::panic::catch_unwind(|| render_cols(component(broken, ()), 80)).unwrap_err();
+    assert_eq!(*error.downcast::<&str>().unwrap(), "Component error");
+}
+
+#[test]
+fn subsequent_calls_work_after_a_component_error() {
+    fn broken(_: &mut Scope, _: &()) -> Element {
+        panic!("Boom");
+    }
+    assert!(std::panic::catch_unwind(|| render_cols(component(broken, ()), 80)).is_err());
     assert_eq!(render_cols(Text::new("Still works"), 80), "Still works");
 }
 

@@ -1,8 +1,26 @@
 use std::cell::Cell;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::{Duration, Instant};
 
 use super::Runtime;
 use crate::{AnimationOptions, Element, RenderOptions, Scope, Text, component};
+
+#[test]
+fn a_panic_in_the_overview_commit_propagates() {
+    super::panic::install();
+    let mut runtime = Runtime::new(
+        component(|_, _: &()| panic!("original panic"), ()),
+        RenderOptions::default(),
+    );
+    runtime.catch = true;
+    runtime.commit();
+    assert_eq!(runtime.take_panic().unwrap().message(), "original panic");
+    runtime.rerender(component(|_, _: &()| panic!("broken overview"), ()));
+    let error = catch_unwind(AssertUnwindSafe(|| runtime.commit()))
+        .err()
+        .unwrap();
+    assert_eq!(*error.downcast::<&str>().unwrap(), "broken overview");
+}
 
 thread_local! {
     static RENDERS: Cell<usize> = const { Cell::new(0) };

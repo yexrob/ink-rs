@@ -6,7 +6,7 @@
 
 Ink 有 95 个测试文件、1,646 个测试。
 
-- **M0**：40 个文件、755 个测试。移植 615 个，写成 619 个 `#[test]`（`content-offset.tsx` 的一个参数化测试按参数拆成 5 个），上游跳过的 4 个中，3 个标 `#[ignore]`，1 个在 taffy 下通过。未移植 140 个，原因见下表，明细见[下文](#m0-文件中未移植的测试)。
+- **M0**：40 个文件、755 个测试。移植 617 个，写成 621 个 `#[test]`（`content-offset.tsx` 的一个参数化测试按参数拆成 5 个），上游跳过的 4 个中，3 个标 `#[ignore]`，1 个在 taffy 下通过。未移植 138 个，原因见下表，明细见[下文](#m0-文件中未移植的测试)。
 - **其他 55 个文件**（891 个测试）：50 个随 M1–M5 移植，5 个不适用。M1 文件中不移植的测试见[下文](#m1-文件中不移植的测试)。
 
 | 未移植原因 | 数量 | 处理 |
@@ -15,7 +15,6 @@ Ink 有 95 个测试文件、1,646 个测试。
 | 重渲染、state、effect | 35 | M1 |
 | Static 跨帧、非 TTY / CI、备用屏幕 | 32 | M2 |
 | 输入、raw mode | 6 | M3 |
-| 组件抛错 | 2 | M4 |
 | 屏幕阅读器 | 2 | M5 |
 | 缺 API | 1 | 见[缺 API](#缺-api) |
 | 不适用 | 16 | 不移植 |
@@ -46,10 +45,10 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `cursor-helpers.tsx` | 17 | — | 0 | 不适用，cell diff 没有对应内部函数 |
 | `cursor.tsx` | 20 | M2 / M3 | 16 | `tests/cursor.rs` |
 | `display.tsx` | 6 | M0 / M1 | 4 | `tests/display.rs` |
-| `error-overview.tsx` | 7 | M4 |  |  |
-| `errors.tsx` | 8 | M4 |  |  |
+| `error-overview.tsx` | 7 | M4 | 6 | `src/error_overview/tests.rs` |
+| `errors.tsx` | 8 | M4 | 6 | `tests/errors.rs` |
 | `exit-keyboard.tsx` | 7 | M3 | 7 | `tests/exit_keyboard.rs` |
-| `exit.tsx` | 15 | M3 | 12 | `tests/exit.rs`、`tests/pty.rs` |
+| `exit.tsx` | 15 | M3 / M4 | 13 | `tests/exit.rs`、`tests/pty.rs` |
 | `flex-align-content.tsx` | 13 | M0 / M1 | 11 | `tests/flex_align_content.rs` |
 | `flex-align-items.tsx` | 9 | M0 | 9 | `tests/flex_align_items.rs` |
 | `flex-align-self.tsx` | 9 | M0 | 9 | `tests/flex_align_self.rs` |
@@ -89,8 +88,8 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `position.tsx` | 13 | M0 / M1 | 11 | `tests/position.rs` |
 | `reconciler.tsx` | 14 | M1 | 7 | `tests/reconciler.rs` |
 | `render-callback.tsx` | 4 | — | 0 | 缺 API / 不适用，见下文 |
-| `render-to-string.tsx` | 37 | M0 / M1 | 32 | `tests/render_to_string.rs` |
-| `render.tsx` | 119 | M2 / M3 / M4 | 51 | `tests/render.rs`、`tests/pty.rs`、`tests/examples.rs` |
+| `render-to-string.tsx` | 37 | M0 / M1 / M4 | 34 | `tests/render_to_string.rs` |
+| `render.tsx` | 119 | M2 / M3 / M4 | 52 | `tests/render.rs`、`tests/pty.rs`、`tests/examples.rs` |
 | `rendering-regressions.tsx` | 2 | M0 | 2 | `tests/rendering_regressions.rs` |
 | `rerender-input.tsx` | 4 | M3 | 3 | `tests/rerender_input.rs` |
 | `sanitize-ansi.ts` | 50 | M0 | 50 | `src/text/sanitize/tests.rs` |
@@ -202,8 +201,8 @@ Ink 有 95 个测试文件、1,646 个测试。
 ### `render-to-string.tsx`
 
 - M1 已移植：`captures initial render output before effect-driven state updates`、`useLayoutEffect state updates are reflected in output`、`runs effect cleanup on teardown`、`runs effect cleanup when a transform throws`
-- M4：`component that throws propagates the error`、`subsequent calls work after a component error`
-- 不适用：`preserves component errors from another realm`（JS realm）、`component that throws undefined does not silently return empty output`（JS 能抛任意值）、`text outside Text component throws`（Rust 编译期拒绝）
+- M4 已移植：`component that throws propagates the error`、`subsequent calls work after a component error`
+- 不适用：`preserves component errors from another realm`（JS realm）、`component that throws undefined does not silently return empty output`（`render_to_string` 不捕获 panic，任何 payload 向上传播，同 `component that throws propagates the error`）、`text outside Text component throws`（Rust 编译期拒绝）
 
 ### `text.tsx`
 
@@ -275,7 +274,6 @@ Ink 有 95 个测试文件、1,646 个测试。
 - M5，屏幕阅读器：`preserve terminal history when rerendering after clear - screen-reader`、`clear screen-reader output`、`preserve screen-reader output around stdout writes`、`replace restored screen-reader output after clear and stdout write`、`replace screen-reader output ending in a newline after stdout write`、`preserve static history when screen-reader output resizes`、`rewrap screen-reader output when the terminal gets wider`。
 - 不适用，design.md 外部输出不捕获 console：`intercept console methods with omitted patchConsole option`、`intercept console methods with undefined patchConsole option`。
 - 缺 API，本阶段不添加 onRender / renderTime：`outputs renderTime when onRender is passed`。
-- M4，错误边界和退出错误处理：`should reject waitUntilExit when app exits during synchronous render error handling`。
 - 不适用，Node 写回调、beforeExit 或测试 helper：`waitUntilExit resolves after stdout write callback`、`createDelayedWriteCallbackStdout delays only the first matching chunk`、`waitUntilExit after unmount does not retain a beforeExit listener`、`issue 596: useEffect can run before the first frame write callback`。
 - 缺 API，本阶段不添加 waitUntilRenderFlush；Terminal 写入没有 Promise 或 Node 写回调：`waitUntilRenderFlush waits for generic stdout write callback`、`waitUntilRenderFlush resolves after stdout write callback`、`waitUntilRenderFlush flushes pending throttled render`、`waitUntilRenderFlush resolves when stdout is not writable`、`waitUntilRenderFlush waits for rerender write callback`、`waitUntilRenderFlush waits for concurrent rerender commit`、`waitUntilRenderFlush waits for all concurrent waiters on the same rerender`、`useApp waitUntilRenderFlush resolves after the first frame write callback`、`useApp waitUntilRenderFlush waits for state update frame flush`、`useApp waitUntilRenderFlush waits for state update queued in same effect tick`、`waitUntilRenderFlush resolves after unmount`、`waitUntilRenderFlush waits for unmount write callback`、`waitUntilRenderFlush after unmount does not register beforeExit listener`、`waitUntilRenderFlush resolves after exit with error`。
 - 不适用，Node 写回调重入、运行时 debug 或 JS realm：`waitUntilExit resolves first exit value when exit is re-entered during unmount writes`、`waitUntilExit resolves first exit value when exit is re-entered during unmount writes in debug mode`、`waitUntilExit resolves first exit value when exit is re-entered during unmount writes with screen reader`、`exit rejects on cross-realm Error`、`exit with cross-realm Error rejects after stdout write callback`。
@@ -338,7 +336,6 @@ Ink 有 95 个测试文件、1,646 个测试。
 - `exit.tsx`：
   - 不适用：`exit on exit() with error with value property`。Ink 按对象属性区分错误与结果值；ink-rs 用 `exit_with_error` 与 `exit_with` 两个方法区分。
   - 不适用，React 开发模式：`exit when DEV is set`。
-  - M4，组件抛错：`exit with thrown error`。
 - `focus.tsx`：
   - 不适用：`generated focus IDs remain distinct when random values collide`。生成的 ID 来自 runtime 内计数，没有随机源；Tab 在三个生成 ID 间切换的用例检查它们互不相同。
   - React 并发模式下的重复：`focus component renders in concurrent mode`、`focus component with autoFocus renders in concurrent mode`。
@@ -353,6 +350,8 @@ Ink 有 95 个测试文件、1,646 个测试。
 - `use-box-metrics.tsx`：
   - 不适用，Node EventEmitter；unmount 消耗 app：`removes resize listener on unmount`、`does not crash when resize fires after unmount`。
   - 并发：`tracks a box mounted by child state - concurrent=true`。
+- `errors.tsx`：不适用，Node 的 unhandledRejection 与 JS realm：`does not emit unhandledRejection when render exits with an error and waitUntilExit is unused`、`waitUntilExit preserves a component error from another realm`。
+- `error-overview.tsx`：不适用，React 的 key 警告：`does not emit duplicate key warnings for repeated stack lines`。错误界面是 View/Text 数据树，没有 key。
 
 ## 缺 API
 
@@ -387,6 +386,7 @@ Ink 有 95 个测试文件、1,646 个测试。
 - **`use_box_metrics` 首帧给值。** Ink 先写出全 0 的帧，passive effect 加微任务后写出测量值。ink-rs 在提交的每一轮刷新 ref 之后比较读者的度量，变了就在 paint 前重渲染，View 首次布局的那一帧即带测量值。`does not trigger extra re-renders when layout is unchanged` 的渲染次数由 Ink 的 2–3 次改为 2 次（未挂载一次、测量后一次）；两个 resize 用例改用 `testing::mount` 与 vt100 屏幕。
 - **`use_animation` 的观测边界。** 假时钟逐个运行截止时间，代替 FakeTimers 的 `tickAsync`，时间下界改为精确值。不断言 JS 定时器的创建与清除次数，共享定时器由 `src/runtime/tests.rs` 的截止时间测试覆盖。`reset` 是句柄，`reset is a stable function reference` 改为用挂载时的副本重置。恢复与改 interval 的归零在 layout effect 中写状态，paint 前重算，不写过时帧。`animations advance in debug mode when interactive is false` 用非交互的 `testing::mount` 与 120 fps，ink-rs 没有运行时 debug 选项。
 - **示例的观测边界。** `render.tsx` 的 16 个示例用例与 `alternate-screen-example.tsx` 不在 PTY 中运行示例进程：`tests/examples.rs` 以 `#[path]` 引入 `examples/<name>/app.rs`，用 `testing::mount` 在进程内挂载，终端尺寸同 Ink `term` 的参数（默认 100 列）。`waitForOutput` 改为越过节流窗口的 `advance`，读 vt100 屏幕。`eraseLines`、`cursorTo`、`cursorUp` 的字节检查改为屏幕行、光标位置与可见性；输出流上的正则改为屏幕行比较，`input example` 在重绘块中的行号改为屏幕的物理行。table 用例用 40 列的 `render_to_string` 代替 CI 子进程，JS 字符串长度改为 `text_width`。aria 用例以 `interactive: Some(false)` 代替 `CI=true`，N 个空格在一次 `input` 中送入，卸载后读最终帧。snake 的反向用例用假时钟推进一个 150ms 的 tick，代替等待 `Score:` 重绘。`alternate-screen-example.tsx` 的两个用例调用 `reduce`，代替解析子进程的 JSON，去掉 1 秒的 kill 计时器。incremental-rendering 示例截断长行，根节点取内容高度：ink-rs 按屏高裁掉帧顶部的行（见 app 高度上限），Ink 的测试读输出流，不受裁剪影响；截断后 30 行的终端放得下标题和选中项。期望文本不变。
+- **错误界面的观测边界。** 位置取 Rust 的 `file:line:column`，不是 file URL，`renders source excerpts for file URLs containing spaces` 改为含空格的文件路径。调用栈只在设置 `RUST_BACKTRACE` 或 `RUST_LIB_BACKTRACE` 时显示，`catch and display error` 比较去色后的前 12 行（标签与消息、位置、7 行源码摘录），不比较 Ink 的栈行；两个 native 栈帧用例喂入构造的 std 格式 backtrace 文本。`ErrorBoundary catches and displays nested component errors` 把抛错组件放在 `Text` 中。`clean up raw mode when error is thrown` 用 `raw_mode_calls()` 为 `[true, false]` 代替 stdin spy。抛字符串、抛 undefined 改为 `panic_any(String)`、`panic_any(())`，后者的消息为 `Box<dyn Any>`。`waitUntilExit preserves the original component error` 经 `take_exit_result` 与 `into_payload` downcast 出 `Arc`，用 `Arc::ptr_eq` 比较身份。`render.tsx` 的 `should reject waitUntilExit when app exits during synchronous render error handling` 没有用户错误边界，改为首次渲染 panic，结果为 `Err(Panic)`。`exit.tsx` 的 `exit with thrown error` 在 `tests/pty.rs` 中重建 fixture，`main` 打印返回的错误；增加检查错误界面、终端恢复与退出码 0，fixture 关闭 backtrace。`render-to-string.tsx` 的两个抛错用例用外层 `catch_unwind` 接住 panic。
 - **Static 追加时写出一次。** Ink 的 Static 靠 index 状态和 layout effect 隐藏已写出的条目，每次追加提交两次、写出两次。ink-rs 的 Static 是 host 节点，追加时写出一次。
 
 ## Ink 期望中反直觉的行为

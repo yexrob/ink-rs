@@ -1,0 +1,1 @@
+panic!("Source excerpt marker");

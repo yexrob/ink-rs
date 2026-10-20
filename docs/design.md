@@ -43,7 +43,7 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
 - **单元格是内部表示。** text 层把字符串解析成带样式的字素（`StyledChar`），layout、paint、output 处理它。字符串出现在边界：`Text` 的内容、Transform 的参数和返回值、`render_to_string` 的结果、写给终端的字节。
 - **时间由驱动传入。** 核心不读时钟，测试传假时间，不设 Clock 接口。
 - **终端 I/O 经 `Terminal` trait。** 核心写字节、取尺寸、切换模式（raw、备用屏、粘贴、kitty 键盘）；读 stdin 归驱动，解析与分发归核心。进程实现（`driver::process`）用于生产，内存实现放在 `testing` 模块。
-- **终端恢复用 RAII。** app 的 drop、panic hook、终止信号共用 Terminal 的恢复操作与已恢复标记；驱动保存跨线程可达的恢复快照，核心不依赖进程 hook。SIGTSTP/SIGCONT 在 M4 接入。
+- **终端恢复用 RAII。** app 的 drop、panic hook、终止信号共用 Terminal 的恢复操作与已恢复标记；驱动保存跨线程可达的恢复快照，核心不依赖驱动的 hook。核心安装自己的 panic hook，记录会被捕获的 panic，见[退出](#退出)。SIGTSTP/SIGCONT 在 M4 接入。
 
 ## 编程模型
 
@@ -143,7 +143,7 @@ M0 的 API（`src/lib.rs`）：
 - **外部输出**：`Scope::use_stdout()`、`Scope::use_stderr()` 返回 `Copy` 的 UI 线程句柄 `OutputWriter`，提供 `write(&str)`，按 runtime id 经状态句柄共用的线程局部注册表找到驱动安装的 `WriteDestination`。render 中写入在 debug 构建下 panic；空字符串忽略；卸载完成最终绘制、开始树清理时关闭写入，清理中的写入丢弃。交互模式擦掉帧、写数据、重画最后绘制的帧及其光标，同 Ink 的 `writeToStdout` / `writeToStderr`；外部写不等窗口，不消费待绘制帧，不改窗口。stdout 用一次 write 发出 `[bsu] + clear + data + redraw + [esu]`；stderr 用 stdout 发出 `[bsu] + clear`、stderr 发出 data、stdout 发出 `redraw + [esu]`，同步序列的条件同帧输出。app 将输出状态与 Runtime 分开持有，执行用户 render、effect、cleanup 时不借用输出状态；layout effect 中的 write 在调用时到达终端，重画前一次绘制的帧，首帧绘制前没有帧可重画。非交互模式把数据原样写给目标流；`render_to_string` 没有目的地，丢弃写入。不捕获 `println!`：它直接写 fd 1，安全代码拦不住；UI 运行期间改用这两个 write。
 - **外部输出的换行**：交互模式在数据末尾不是 `\n` 时补 `\r\n`，Ink 不补。重画依赖 cell diff 的第 0 列起点，缺少结尾换行会覆盖数据。数据中的 `\n` 原样写出，同 Ink：raw mode 同 libuv 保留 `OPOST` 与 `ONLCR`，由终端回到第 0 列。测试的 `Screen` 在交给 vt100 前把 `\n` 换成 `\r\n`，模拟 `ONLCR`。非交互和 debug 模式不转换数据。
 - **debug 外部输出**同 Ink：stdout write 向 `testing::render` 的 `frames()` 添加一项 `data + 累计 Static + 上次 live`；stderr write 向 `stderr()` 添加 data，再向 `frames()` 添加 `累计 Static + 上次 live`。顺序按写入时刻记录，每一步结束时并入 `frames()` / `stderr()`；在步进之外经保留的句柄写入的内容，下一步后出现。`TestTerminal::output()` 按写入顺序记录 stdout / stderr，`writes()` 与 `stderr()` 分流读取。
-- **恢复终端**：退出、panic、SIGINT / SIGTERM / SIGHUP 时还原 termios、关闭 bracketed paste、弹出 kitty flags、显示光标、退出备用屏、把光标移到帧下方；后三种情况经恢复快照完成，开启了粘贴或 kitty 时快照含 `CSI ?2004l`、`CSI <u`。signal-hook iterator 线程向所有 live app 转发 SIGINT / SIGTERM / SIGHUP 与 SIGWINCH。所有 app 位于 wait_until_exit 时，各 UI 循环卸载并运行清理，最后一个注册移除后用 `emulate_default_handler` 按原信号终止，其他已卸载循环等待进程结束；保留首个终止信号。任一 app 位于循环外（包括 render 到 wait 之间、手动卸载期间或同线程嵌套 wait 暂停的外层循环），信号线程恢复所有 live app 后终止，不运行树清理。最后一个 app 卸载后打开 `register_conditional_default` 的原子条件，三种信号恢复默认效果；信号设施保持安装，避免 signal-hook unregister 后残留 handler 吞掉信号。正常卸载先提交未完成工作、写待绘制帧，再运行树清理，最后恢复终端；无待绘制帧时不重画，因此 clear 后卸载不恢复内容。panic 中的 Drop 跳过提交和 paint，先恢复终端再运行清理，避免清理中的 panic 导致 abort 前终端未恢复。每次 Terminal 操作连同其完成后的恢复字节交给驱动，写入与发布快照共用锁：主屏来自不改变 Output 状态的 done 字节，备用屏为 `CSI ?1049l CSI ?25h`；stderr 外部写跨流阶段还结束未闭合的同步更新。首个恢复者写快照并标记已恢复，后续写入（包括 unwinding Drop）丢弃。测试 Terminal 忽略快照。render 安装一次进程 panic hook，先恢复当前 panic 线程拥有的 app，再调用原 hook；hook 先释放 stdin，再写恢复快照，快照的锁被 panic 打断的操作持有时跳过，由 unwinding 的 Drop 写出；其他线程 panic 不碰 UI 终端。`cfg(panic = "abort")` 下恢复所有 live app。M4 增加错误界面；Ctrl+Z 挂起与 SIGCONT 后重画在 M4。
+- **恢复终端**：退出、panic、SIGINT / SIGTERM / SIGHUP 时还原 termios、关闭 bracketed paste、弹出 kitty flags、显示光标、退出备用屏、把光标移到帧下方；后三种情况经恢复快照完成，开启了粘贴或 kitty 时快照含 `CSI ?2004l`、`CSI <u`。signal-hook iterator 线程向所有 live app 转发 SIGINT / SIGTERM / SIGHUP 与 SIGWINCH。所有 app 位于 wait_until_exit 时，各 UI 循环卸载并运行清理，最后一个注册移除后用 `emulate_default_handler` 按原信号终止，其他已卸载循环等待进程结束；保留首个终止信号。任一 app 位于循环外（包括 render 到 wait 之间、手动卸载期间或同线程嵌套 wait 暂停的外层循环），信号线程恢复所有 live app 后终止，不运行树清理。最后一个 app 卸载后打开 `register_conditional_default` 的原子条件，三种信号恢复默认效果；信号设施保持安装，避免 signal-hook unregister 后残留 handler 吞掉信号。正常卸载先提交未完成工作、写待绘制帧，再运行树清理，最后恢复终端；无待绘制帧时不重画，因此 clear 后卸载不恢复内容。panic 中的 Drop 跳过提交和 paint，先恢复终端再运行清理，避免清理中的 panic 导致 abort 前终端未恢复。每次 Terminal 操作连同其完成后的恢复字节交给驱动，写入与发布快照共用锁：主屏来自不改变 Output 状态的 done 字节，备用屏为 `CSI ?1049l CSI ?25h`；stderr 外部写跨流阶段还结束未闭合的同步更新。首个恢复者写快照并标记已恢复，后续写入（包括 unwinding Drop）丢弃。测试 Terminal 忽略快照。render 安装一次进程 panic hook，先恢复当前 panic 线程拥有的 app，再调用原 hook；hook 先释放 stdin，再写恢复快照，快照的锁被 panic 打断的操作持有时跳过，由 unwinding 的 Drop 写出；其他线程 panic 不碰 UI 终端。`cfg(panic = "abort")` 下恢复所有 live app。会被捕获的组件 panic 不经过这条路径，见[退出](#退出)。Ctrl+Z 挂起与 SIGCONT 后重画在 M4。
 
 ## 输入
 
@@ -162,14 +162,19 @@ M0 的 API（`src/lib.rs`）：
 
 ## 退出
 
-同 Ink 的 `useApp().exit`。`AppHandle` 提供三个方法：`exit()` 的结果为 `Ok(None)`；`exit_with(value)` 为 `Ok(Some(value))`，值类型为 `Box<dyn Any + Send>`，调用方 downcast，Ink 的结果可以是任意值；`exit_with_error(error)` 为 `Err(Error::App(..))`。`Error` 有两个变体：`Io(io::Error)` 与 `App(Box<dyn std::error::Error + Send + Sync>)`。
+同 Ink 的 `useApp().exit`。`AppHandle` 提供三个方法：`exit()` 的结果为 `Ok(None)`；`exit_with(value)` 为 `Ok(Some(value))`，值类型为 `Box<dyn Any + Send>`，调用方 downcast，Ink 的结果可以是任意值；`exit_with_error(error)` 为 `Err(Error::App(..))`。`Error` 有三个变体：`Io(io::Error)`、`App(Box<dyn std::error::Error + Send + Sync>)` 与 `Panic(PanicError)`。
 
 - 第一次退出请求生效；开始卸载后的请求，包括清理函数中的调用，被忽略。
 - 退出不在调用内完成。下一步依次：关闭 raw mode，写待绘制帧，运行树清理，恢复终端（关闭粘贴、弹出 kitty flags、显示光标、退出备用屏），最后把结果交给 `wait_until_exit`。
 - `wait_until_exit` 阻塞时，外部经保留的 `AppHandle` 调 `exit()` 结束应用，对应 Ink 测试中的外部 `unmount()`。Ctrl+C 与自然结束的结果为 `Ok(None)`；I/O 错误为 `Err(Error::Io(..))`。
-- 结果在 App 中合并，取第一个失败：退出错误，其次是卸载中的 I/O 错误，最后是退出值。
-- `TestApp::exit_result` 读取合并后的结果。`testing::render` 没有 App，退出请求不生效。
+- 结果在 App 中合并，取第一个失败：退出错误，其次是卸载中的 I/O 错误，最后是退出值。组件 panic 替换待处理的 `Ok` 退出，不替换先前的 `Err`。
+- `TestApp::exit_result` 读取合并后的结果，`take_exit_result` 取走结果，连同退出值与 panic payload 的所有权。`testing::render` 没有 App，退出请求不生效。
 - 退出错误不改变进程退出码，由应用决定如何报告，同 Ink。
+- **组件 panic**：同 Ink 的 ErrorBoundary，live app 捕获 reconcile、insertion effect、layout effect（含清理）、passive effect 与 Static 退场后清理中的 panic，`catch_unwind` 包住这些区域。render 或 layout effect 中的 panic 让本轮提交换上空根，比对时退场出错的子树，清理在捕获区内运行；passive 中的 panic 留待下次提交换树。记录第一个 panic，丢弃之后的。App 用错误界面重渲染根，以 `Err(Error::Panic(..))` 请求退出，下一步走正常卸载：关闭 raw mode、写出错误界面、清理、恢复终端。首次渲染的 panic 在 render 的第一步卸载，`wait_until_exit` 返回存下的结果。错误界面提交中的 panic 继续 unwind，不循环。
+- **`PanicError`** 保存消息（`&str` / `String` payload，其他类型为 `Box<dyn Any>`，同 std 的 hook）、位置与原 payload；`resume_unwind(e.into_payload())` 得到 panic 的退出码 101。`State`、`OutputWriter`、`FocusManager` 中会 panic 的方法标 `#[track_caller]`，位置指向调用者。
+- **错误界面**同 Ink 的 ErrorOverview：红底 ` ERROR ` 标签与消息、暗色位置、出错行上下各三行的源码摘录（读取失败时省略）。设置 `RUST_BACKTRACE` 或 `RUST_LIB_BACKTRACE` 时附调用栈：去掉 std、core、alloc 与两个 hook 的帧，在 runtime 调用组件处截断，每帧一个 `Text`，长符号在一段内折行。它是卸载时的最终帧，备用屏退出时随屏幕丢弃，同 Ink。
+- **不捕获**：输入与粘贴回调、`AppHandle::update` 闭包、Transform，同 Ink；卸载中的清理，Ink 丢弃这里的错误，ink-rs 让 panic 传出；`testing::render` 与 `render_to_string`，panic 让 Rust 测试失败；`panic = "abort"`。这些 panic 走恢复终端的 hook 路径。
+- **两个 hook 协作**：App 创建时安装一次核心 hook（`runtime::panic`）。panic 发生在捕获区内时，核心 hook 记录位置与 backtrace 后返回，不调用原 hook，std 的消息不覆盖帧；驱动 hook 见到同一条件，不恢复终端，交给前一个 hook。两者共用安装锁，安装顺序任意。unwinding 中再次进入 hook 是 Drop 中的 panic，之后 std 会 abort，这次走未捕获路径，驱动先恢复终端。组件自己的 `catch_unwind` 接住的 panic 不打印 std 的消息，但置位 unwinding 标记，同一捕获区内之后逃出的 panic 走未捕获路径。
 
 ## 测试
 

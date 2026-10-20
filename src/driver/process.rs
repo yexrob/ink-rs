@@ -288,8 +288,17 @@ impl Drop for Registration {
 fn install_panic_hook() {
     static HOOK: Once = Once::new();
     HOOK.call_once(|| {
+        let _install = crate::runtime::panic::HOOK_INSTALL
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let previous = panic::take_hook();
         panic::set_hook(Box::new(move |info| {
+            // If installed after the core hook, delegate capture to it. If
+            // installed before it, caught panics never reach this hook.
+            if crate::runtime::panic::capturing() {
+                previous(info);
+                return;
+            }
             // Do not hold the registry while waiting on a terminal: its owner
             // may be in this hook trying to snapshot the same registry.
             let entries = registry().entries.lock().unwrap().clone();
