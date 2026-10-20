@@ -75,10 +75,10 @@ Ink 有 95 个测试文件、1,646 个测试。
 | `kitty-keyboard.tsx` | 77 | M3 |  |  |
 | `kitty-negotiation.tsx` | 5 | M3 |  |  |
 | `line-update.ts` | 29 | M2 |  |  |
-| `log-update-blank-growth.ts` | 4 | M2 |  |  |
-| `log-update-columns.tsx` | 8 | M2 |  |  |
-| `log-update-sparse.ts` | 9 | M2 |  |  |
-| `log-update.tsx` | 52 | M2 |  |  |
+| `log-update-blank-growth.ts` | 4 | M2 | 3 | `src/output/tests/log_update_blank_growth.rs` |
+| `log-update-columns.tsx` | 8 | M2 | 2 | `src/output/tests/log_update_columns.rs` |
+| `log-update-sparse.ts` | 9 | M2 | 8 | `src/output/tests/log_update_sparse.rs` |
+| `log-update.tsx` | 52 | M2 | 31 | `src/output/tests/log_update.rs` |
 | `margin.tsx` | 15 | M0 / M1 | 13 | `tests/margin.rs` |
 | `measure-element.tsx` | 13 | M1 |  |  |
 | `measure-text.tsx` | 13 | M0 | 11 | `src/text/measure/tests.rs` |
@@ -238,12 +238,26 @@ Ink 有 95 个测试文件、1,646 个测试。
   - 重复：`replace child node with text` 与 `components.tsx` 的同名测试相同，移植在 `tests/components.rs`。
 - `static-abandoned-render.tsx`、`styles.ts`：整个文件不适用，原因见[按文件](#按文件)。
 
+## M2 文件中不移植的测试
+
+- `log-update.tsx`：
+  - 重复，只差 `incrementalRendering`：`incremental rendering - renders and updates output`、`incremental rendering - skips identical output`、`incremental rendering - clear() erases the frame with the cursor at row 0`、`incremental rendering - clear() erases the frame with the cursor at row 5`、`incremental rendering - positions cursor after surgical updates`、`incremental rendering - repositions cursor when only cursor position changes (same output)`、`incremental rendering - cursor-only update with no trailing newline lands on the target line`。
+  - 不适用：`incremental rendering - single write call with multiple surgical updates` 检查 write 的次数；名字含 `sync()` 的 12 个测试检查 Ink 的 `sync()` 方法，ink-rs 的输出层自己记录屏幕上的内容，没有这个方法。
+  - 不移植：`incremental rendering - no trailing newline: trailing to no-trailing transition`。两帧的行相同，只差末尾换行。ink-rs 由视口高度决定末尾换行，这个变化只在视口变矮时出现，由 `terminal-resize.tsx` 的测试覆盖。
+- `log-update-columns.tsx`：
+  - 不适用：`falls back after a width change or a frame height change`、`clear invalidates the prefix baseline`、`reset invalidates the prefix baseline`、`done invalidates the prefix baseline`、`sync establishes the prefix baseline for the next frame`。它们检查 Ink 增量模式按行前缀重写的算法，ink-rs 按单元格比较。
+  - M2，需要实例：`side-by-side public components do not rewrite the unchanged left region`。
+- `log-update-sparse.ts`：不适用：`the screen reducer preserves skipped cells until they are erased`，它测的是 Ink 的测试辅助函数 `reconstructTerminalLines`。
+- `log-update-blank-growth.ts`：M2，需要实例：`growing a rendered Box with an empty row preserves terminal history`。
+
 ## 缺 API
 
 - `<Text backgroundColor="">`：Ink 用空字符串表示不继承父 `Box` 的背景色。Rust 的 `Text::background_color` 收 `Option<Color>`，`None` 表示继承，没有表达"无背景"的值。影响 `background.tsx` 的 `Mixed text with and without background inheritance`。
 
 ## 与 Ink 测试的差异
 
+- **log-update 的测试检查屏幕。** 移植版把输出的字节交给 vt100，检查屏幕、scrollback、光标的位置和可见性，以及没有写出字节。Ink 锁定字节的断言（`eraseLines` 的行数、`ESC E` 等）改为检查这些字节产生的屏幕。vt100 在待换行状态下执行 EL 不擦最后一格，xterm 会擦，所以 `full-width updates do not erase after the last character` 还检查字节：满宽的行之后没有 EL。
+- **视口高度代替末尾换行。** Ink 的 log-update 测试为每帧选择是否带末尾换行，ink-rs 由视口高度决定：帧高达到屏高时不带。移植版为每个测试选视口高度，让被断言的帧停在 Ink 的位置。`incremental rendering - no trailing newline: shrink` 从满屏缩短，两帧无法同时对上：缩短后光标按 design.md 停在帧的下一行，Ink 的测试停在帧的最后一行。Ink 的公开 render 退出满屏后，光标也停在帧的下一行。
 - **SGR 字节检查改为完整比较。** Ink 有 16 个测试用 `includes()` 检查 chalk 生成的 SGR 字节，如 `\x1b[41m`。移植版改用 `assert_ansi_eq` 比较完整输出，完整输出取自 Ink 测试运行时的记录。这样检查样式语义，不锁定 SGR 的写法。涉及 `background.tsx` 8 个、`border-backgrounds.tsx` 4 个、`borders.tsx` 1 个、`text.tsx` 3 个。
 - **非 SGR 序列的检查不变。** `text.tsx` 中检查光标移动、DCS、SOS 等序列被剥离、OSC 超链接被保留的断言，与 Ink 一样用 `contains`。
 - **`colorize.ts`**：Rust 版测颜色字符串的解析（`"…".parse::<Color>()`），生成 SGR 的部分由渲染测试覆盖。

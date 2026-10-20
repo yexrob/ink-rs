@@ -17,6 +17,9 @@ mod components;
 mod element;
 mod host;
 mod layout;
+// Unused until the M2 instance and sync driver call it.
+#[allow(dead_code)]
+mod output;
 mod paint;
 mod render;
 mod runtime;
