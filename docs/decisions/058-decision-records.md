@@ -1,8 +1,8 @@
 # 决策记录与记录规则
 
 - 日期：2026-10-21
-- 状态：实施中
-- 提交：无
+- 状态：已实施
+- 提交：`42f88a9` docs: record the basis of past decisions；`b4a1b84` docs: require a decision record before each change；`9f31b97` docs: describe the test screen pulling rows back on height growth
 - Brief：[decision-history](briefs/decision-history.md)
 
 ## 背景
@@ -30,4 +30,4 @@
 - 第一次导出漏掉了会话中途插入的用户消息（transcript 里存为 `queued_command` 附件，不是普通的用户条目）。补导出后发给 d、e 两段的 agent，f 段改用用户原话。
 - 段边界的重复合并两处：写控制的两条合成 [038](038-write-control.md)，同步驱动与 tmux 的两条合成 [021](021-m2-p2c-sync-driver-decisions.md)。
 - 得到 001–057 共 57 条记录。各 agent 查不到的依据在记录里写明「记录中未见」。
-- design.md 测试一节说行增长不从 scrollback 拉回内容，与 `tests/common::Screen` 自 `6921715` 起的行为不符，单独提交修正。
+- design.md 测试一节说行增长不从 scrollback 拉回内容，与 `tests/common::Screen` 自 `6921715` 起的行为不符，单独提交修正（`9f31b97`）。

@@ -1,8 +1,8 @@
 # 运行时原语：context、`Element: PartialEq`、`Callback` 与 `use_callback`
 
 - 日期：2026-10-21
-- 状态：实施中
-- 提交：无
+- 状态：已实施
+- 提交：`404c4d8` feat: let components take children and callbacks as props；`d6e500d` feat(runtime): add context hooks
 - Brief：[context](briefs/context.md)、[props](briefs/props.md)
 
 ## 背景
@@ -61,4 +61,5 @@
 - 两份 patch 只在 `Kind` 枚举处冲突，手工合并。
 - 全量：`cargo test --workspace` 1328 通过，`--no-default-features` 1296 通过，0 失败；fmt、两套 feature 的 clippy 通过。
 - `docs/design.md` 编程模型加两条：子元素和回调作 props、context。
+- props 提交单独检出暂存区构建，fmt、clippy 通过，测试 1325 通过，少 context 的 3 个。检出构建与主目录共用 target 目录，cargo 把主目录较旧的文件当成最新，复用了检出构建的产物；主目录 touch 改动的文件后重跑全量。
 - 两个 worktree 删除。

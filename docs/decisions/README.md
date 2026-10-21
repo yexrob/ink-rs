@@ -98,5 +98,5 @@
 | [054](054-conpty-tests-ci.md) | 2026-10-21 | ConPTY 下的测试、三平台 CI 与 #969 实测 | 已实施 |
 | [055](055-release-0-1-1.md) | 2026-10-21 | 发布 0.1.1 | 已实施 |
 | [056](056-upper-framework.md) | 2026-10-21 | 上层框架：新仓库，参照 Pastel 与 Ink UI | 部分实施（原语见 057，其余待做） |
-| [057](057-runtime-primitives.md) | 2026-10-21 | 运行时原语：context、`Element: PartialEq`、`Callback` 与 `use_callback` | 实施中 |
-| [058](058-decision-records.md) | 2026-10-21 | 决策记录与记录规则 | 实施中 |
+| [057](057-runtime-primitives.md) | 2026-10-21 | 运行时原语：context、`Element: PartialEq`、`Callback` 与 `use_callback` | 已实施 |
+| [058](058-decision-records.md) | 2026-10-21 | 决策记录与记录规则 | 已实施 |
