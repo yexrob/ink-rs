@@ -21,8 +21,10 @@ fn fixture(mode: &'static str, bytes: &str) {
                         "ctrlPunctuation" => input == "_" && key.ctrl && !key.meta,
                         "lowercase" => input == "q",
                         "uppercase" => (input == "Q" && key.shift) || (input == "\r" && !key.shift),
-                        "pastedCarriageReturn" => input == "\rtest",
-                        "pastedTab" => input == "\ttest",
+                        // Ink delivers "\rtest" and "\ttest" as one input;
+                        // ink-rs splits the key off, and exit stops the rest.
+                        "pastedCarriageReturn" => input == "\r" && key.enter,
+                        "pastedTab" => input.is_empty() && key.tab,
                         "bracketedPaste" => input == "hello",
                         "escape" => key.escape,
                         "escapeNoMeta" => key.escape && !key.meta,
@@ -88,12 +90,12 @@ fn use_input_carriage_return_should_not_count_as_an_uppercase_character() {
 }
 
 #[test]
-fn use_input_pasted_carriage_return() {
+fn use_input_splits_pasted_carriage_return() {
     fixture("pastedCarriageReturn", "\rtest");
 }
 
 #[test]
-fn use_input_pasted_tab() {
+fn use_input_splits_pasted_tab() {
     fixture("pastedTab", "\ttest");
 }
 

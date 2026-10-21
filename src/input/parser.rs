@@ -150,9 +150,11 @@ fn escape_sequence_len(input: &str) -> Option<usize> {
 fn split_control_bytes(text: &str, events: &mut Vec<InputEvent>) {
     let mut start = 0;
     for (index, byte) in text.bytes().enumerate() {
-        // CR and TAB stay inside text runs; BS, DEL and Ctrl+C must reach
-        // key handling as individual events (src/input-parser.ts:185-210).
-        if matches!(byte, 0x7f | 0x08 | 0x03) {
+        // BS, DEL and Ctrl+C reach key handling as individual events
+        // (src/input-parser.ts:185-210). Ink keeps CR and TAB inside text runs
+        // for pasted text; splitting them keeps Enter and Tab keys read together
+        // apart, and bracketed paste keeps pasted text whole.
+        if matches!(byte, 0x7f | 0x08 | 0x03 | b'\r' | b'\t') {
             if start < index {
                 events.push(InputEvent::Text(text[start..index].into()));
             }

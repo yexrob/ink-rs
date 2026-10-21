@@ -102,3 +102,4 @@
 | [058](058-decision-records.md) | 2026-10-21 | 决策记录与记录规则 | 已实施 |
 | [059](059-rsx-props-derive.md) | 2026-10-21 | rsx 组件语法：`#[derive(Props)]` | 已实施 |
 | [060](060-release-0-1-2-and-eink-rs.md) | 2026-10-21 | 发布 0.1.2，建 eink-rs 仓库 | 已实施 |
+| [061](061-split-cr-tab.md) | 2026-10-21 | 输入解析拆开 CR 与 TAB | 实施中 |

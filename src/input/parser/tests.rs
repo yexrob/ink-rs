@@ -564,19 +564,27 @@ fn splits_interleaved_text_and_0x7f_backspace_characters() {
     );
 }
 
+// Ink keeps CR and TAB in the text run; ink-rs splits them so keys read
+// together are not lost.
 #[test]
-fn does_not_split_pasted_carriage_return_from_text() {
+fn splits_carriage_return_from_text() {
     assert_eq!(
         parse_chunks(&["\rtest"]),
-        vec![InputEvent::Text("\rtest".into())]
+        vec![
+            InputEvent::Text("\r".into()),
+            InputEvent::Text("test".into())
+        ]
     );
 }
 
 #[test]
-fn does_not_split_pasted_tab_from_text() {
+fn splits_tab_from_text() {
     assert_eq!(
         parse_chunks(&["\ttest"]),
-        vec![InputEvent::Text("\ttest".into())]
+        vec![
+            InputEvent::Text("\t".into()),
+            InputEvent::Text("test".into())
+        ]
     );
 }
 
