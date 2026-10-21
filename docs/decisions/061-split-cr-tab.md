@@ -1,8 +1,8 @@
 # 输入解析拆开 CR 与 TAB
 
 - 日期：2026-10-21
-- 状态：实施中
-- 提交：无
+- 状态：已实施
+- 提交：`7a0977d` fix(input): split CR and TAB from text runs
 - Brief：无，主 agent 自己做
 
 ## 背景
@@ -29,3 +29,7 @@ eink-rs 移植 Ink UI 的输入组件时（eink-rs 的记录 002）发现：一�
 ## 方案
 
 主 agent 自己做：改 `src/input/parser.rs` 的 `split_control_bytes` 和四个测试，更新 `docs/design.md`，跑全量测试、clippy、fmt，提交。
+
+## 结果
+
+`split_control_bytes` 加了 CR 和 TAB。全量测试先报两个失败，是 `hooks_use_input` 里移植自 Ink 的粘贴 CR、粘贴 TAB 测试，方案里只列了解析器的两个；四个测试一起改，记录的决策已补上。改后 `cargo test --all-features` 1330 个通过，`--no-default-features`、clippy、fmt 通过。未推送，未发布。
