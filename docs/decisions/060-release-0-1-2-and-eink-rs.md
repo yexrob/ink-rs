@@ -1,8 +1,8 @@
 # 发布 0.1.2，建 eink-rs 仓库
 
 - 日期：2026-10-21
-- 状态：实施中
-- 提交：无
+- 状态：已实施
+- 提交：`f1a3ae9` docs: list context, callbacks and Props in the README；`85e06ad` chore: release 0.1.2
 - Brief：无，主 agent 自己做
 
 ## 背景
@@ -28,3 +28,10 @@
 3. 推送 main，等 CI 的 7 个 job。
 4. 打标签，`cargo publish -p ink-rs-macros`，等索引可见后 `cargo publish -p ink-rs`。
 5. `gh repo create yexrob/eink-rs --public`。
+
+## 结果
+
+- 本地全量：`cargo test --workspace` 1330 通过，`--no-default-features` 1296 通过；fmt、两套 feature 的 clippy 通过。`cargo package --list` 核对：ink-rs 不含 `docs/`、`macros/`，macros 包含 `src/props.rs`。
+- main 从 `a6cea3a` 快进到 `85e06ad` 并推送，CI run 39546019768 的 7 个 job 全部通过。
+- `v0.1.2` 标签推送；ink-rs-macros 0.1.1 和 ink-rs 0.1.2 发布到 crates.io。
+- `yexrob/eink-rs` 建好，公开，空仓库。

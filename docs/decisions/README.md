@@ -101,4 +101,4 @@
 | [057](057-runtime-primitives.md) | 2026-10-21 | 运行时原语：context、`Element: PartialEq`、`Callback` 与 `use_callback` | 已实施 |
 | [058](058-decision-records.md) | 2026-10-21 | 决策记录与记录规则 | 已实施 |
 | [059](059-rsx-props-derive.md) | 2026-10-21 | rsx 组件语法：`#[derive(Props)]` | 已实施 |
-| [060](060-release-0-1-2-and-eink-rs.md) | 2026-10-21 | 发布 0.1.2，建 eink-rs 仓库 | 实施中 |
+| [060](060-release-0-1-2-and-eink-rs.md) | 2026-10-21 | 发布 0.1.2，建 eink-rs 仓库 | 已实施 |
