@@ -35,11 +35,13 @@ fn main() -> Result<(), Error> {
 ## Features
 
 - **Components:** `View` (Ink's `Box`), `Text`, `Static`, `Transform`, `Newline`
-  and `Spacer`. A component is a function `fn(&mut Scope, &Props) -> Element`.
-- **Hooks:** `use_state`, `use_memo`, `use_effect`, `use_layout_effect`,
-  `use_input`, `use_paste`, `use_focus`, `use_focus_manager`, `use_app`,
-  `use_stdout`, `use_stderr`, `use_window_size`, `use_box_metrics`,
-  `use_node_ref`, `use_cursor`, `use_animation` and, with tokio, `use_future`.
+  and `Spacer`. A component is a function `fn(&mut Scope, &Props) -> Element`;
+  props can hold children (`Element`) and callbacks (`Callback`).
+- **Hooks:** `use_state`, `use_memo`, `use_callback`, `use_effect`,
+  `use_layout_effect`, `provide`, `use_context`, `use_input`, `use_paste`,
+  `use_focus`, `use_focus_manager`, `use_app`, `use_stdout`, `use_stderr`,
+  `use_window_size`, `use_box_metrics`, `use_node_ref`, `use_cursor`,
+  `use_animation` and, with tokio, `use_future`.
 - **Two ways to build trees:** the `rsx!` macro, or the builder API it expands to.
 - **Rendering:** interactive output with a throttle, non-interactive output for
   CI and pipes, the alternate screen, Ctrl+Z suspension, resize handling, and an
@@ -61,7 +63,7 @@ Ink's screen reader mode is not ported yet.
 
 | Feature  | Default | Provides                                   |
 |----------|---------|--------------------------------------------|
-| `macros` | yes     | `rsx!`                                     |
+| `macros` | yes     | `rsx!` and `#[derive(Props)]`              |
 | `tokio`  | yes     | `ink_rs::tokio` and `Scope::use_future`    |
 
 ## Examples
