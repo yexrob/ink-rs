@@ -67,7 +67,7 @@ dependencies = [
 
 [[package]]
 name = "ink-rs"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "filedescriptor",
  "ink-rs-macros",
