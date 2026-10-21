@@ -21,7 +21,13 @@ Claude 的答复：方向同意，不照搬 Next.js，它解决的 SSR、URL 路
   - 命令路由 A 和 B 都做：A 是 clap derive 的 enum 路由，做底座；B 是 build.rs 扫描 `src/commands/` 生成 A，叠在 A 上。
   - Pastel 之外补四项：退出码（`Err` 返回 1，参数错误沿用 clap 的 2）、异步命令（接 tokio 驱动）、shell 补全（clap_complete，放可选 feature）、测试（给 argv，在 `testing` 上断言帧）。
   - rsx 的组件语法（`Layout(title: "Deploy") { .. }`，在 props 结构体上派生 builder）放在 ink-rs-macros，等原语合并后做，细节另行讨论。
-- Ink UI 的五点待用户答复（见结果）。
+- Ink UI 的五点按 Claude 的推荐。用户答「别的按照你的推荐」：
+  1. 主题：每个组件一个主题类型，各自作为 context 提供，外加一层颜色 token。
+  2. 焦点：保持 `is_disabled`，用户自己接 `use_focus`。
+  3. 各组件的状态层公开为 headless hook。
+  4. 范围：先做 Ink UI 的 13 个组件，第二批做框架时按需定。
+  5. 输入框：一个内核支持 mask 和补全来源，EmailInput、PasswordInput 写成薄封装。
+- 新仓库名 `eink-rs`。用户决定（「我们原仓库叫ink-rs， 那新仓库就叫做 墨水屏-rs  翻译成英文」），Claude 把「墨水屏」译作 e-ink。crate 名 `eink-rs` 和 `eink` 在 crates.io 上没有被占用（2026-10-21 查）。
 
 ## 备选与取舍
 
@@ -40,12 +46,6 @@ Claude 的答复：方向同意，不照搬 Next.js，它解决的 SSR、URL 路
 
 - 没有代码或提交。决定记进了项目 memory。
 - 整体顺序由 Claude 提出，用户确认（「这个顺序我觉得没问题」）：原语 → rsx 组件语法 → 新仓库移植 Ink UI → Pastel 的 Rust 版（先 A 和那四项，再 B）。
-- 待用户答复（Claude 的推荐在括号里）：
-  1. 主题形态（每个组件一个主题类型，各自作为 context 提供，外加一层颜色 token）；
-  2. 焦点（保持 `is_disabled`，用户自己接 `use_focus`）；
-  3. 状态层是否公开为 headless（公开）；
-  4. 范围（先做 Ink UI 的 13 个组件，第二批做框架时按需定）；
-  5. 输入框（一个内核支持 mask 和补全来源，EmailInput、PasswordInput 写成薄封装）；
-  以及新仓库的名字。
+- Ink UI 的五点和仓库名在原语合并后定下，见决策一节。
 - Claude 开场提的三个问题（目标是一次运行的 CLI 还是常驻全屏 TUI、移植还是自行设计、有没有驱动案例），记录中未见用户逐条答复。屏内导航、store/query、键位帮助、表单、非交互降级等方向停留在讨论。
 - 用户随后要求把历次决策写进 `docs/`，Ink UI 的讨论在此暂停。
