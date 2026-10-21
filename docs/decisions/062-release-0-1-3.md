@@ -1,8 +1,8 @@
 # 发布 0.1.3
 
 - 日期：2026-10-21
-- 状态：实施中
-- 提交：无
+- 状态：已实施
+- 提交：`dc6bdca` chore: release 0.1.3
 - Brief：无，主 agent 自己做
 
 ## 背景
@@ -25,3 +25,9 @@
 2. 本地 fmt、两套 feature 的 clippy、全量测试。
 3. 推送 main，等 CI 的 7 个 job。
 4. 打 `v0.1.3` 标签并推送，`cargo publish -p ink-rs`。
+
+## 结果
+
+- 本地全量：`cargo test --workspace` 1330 通过，`--no-default-features` 1296 通过；fmt、两套 feature 的 clippy 通过。`cargo package --list` 不含 `docs/`、`macros/`。
+- main 推送到 `dc6bdca`，CI run 39553504722 的 7 个 job 全部通过。
+- `v0.1.3` 标签推送，ink-rs 0.1.3 发布到 crates.io。eink-rs 的记录 006 升级了依赖。
