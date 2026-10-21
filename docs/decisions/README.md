@@ -100,3 +100,4 @@
 | [056](056-upper-framework.md) | 2026-10-21 | 上层框架：新仓库，参照 Pastel 与 Ink UI | 部分实施（原语见 057，其余待做） |
 | [057](057-runtime-primitives.md) | 2026-10-21 | 运行时原语：context、`Element: PartialEq`、`Callback` 与 `use_callback` | 已实施 |
 | [058](058-decision-records.md) | 2026-10-21 | 决策记录与记录规则 | 已实施 |
+| [059](059-rsx-props-derive.md) | 2026-10-21 | rsx 组件语法：`#[derive(Props)]` | 实施中 |
