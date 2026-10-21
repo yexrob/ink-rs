@@ -56,6 +56,7 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
 - **调度**：一轮事件处理完，所有更新合并成一次提交：重渲染标脏的组件和 props 变化的子树、比对、布局、执行 `use_layout_effect`。提交不节流；paint 和写出受 `max_fps` 限制（Ink 默认 30，窗口 34ms），同 Ink：窗口内第一次立即写出，其余合并到窗口结束时写出。Static 有新条目、resize、卸载、外部写、`clear()` 不等窗口。
 - **空闲**：没有变化时零唤醒、零渲染，由测试保证。
 - **effect**：`use_layout_effect` 在布局之后、paint 之前执行，可以读元素尺寸，写状态会让这一帧在写出前重算，一帧写出一次。Ink 在提交时写出，之后执行 layout effect，状态变了写第二帧；ink-rs 不写这个中间帧。`use_effect` 在提交之后执行，这一帧没被节流时在写出之后，同 React：passive effect 跟着提交走，不等节流后的写出。清理靠返回值的 `Drop`；组件卸载时它的异步任务随 drop 取消。
+- **context**：`provide(value)` 把值交给组件返回的子树，`use_context::<T>()` 返回最近祖先提供的值，没有时为 `None`。按类型区分，同类型的两个 context 用 newtype。组件读不到自己 provide 的值，同 React 中 Provider 位于返回的树里。两个都是 hook，占调用顺序的位置。实例的祖先和 hook 顺序在它的生命周期内不变，所以 reader 挂载时找到 provider，用 `Dirty` 的弱引用登记。provider 的值变化时标脏 reader，标记向上冒泡，reconcile 穿过 props 相等、被跳过的中间组件，在同一次提交重渲染 reader，不出中间帧；值相等时不触发。
 - **继承的属性**：View 的背景色经内建 context 传给后代 Text，同 Ink 的 `BackgroundContext`。背景色变化时，运行时更新下面受影响的 Text 节点，props 相等的组件不重跑：Ink 中重渲染的是读这个 context 的 Text，不是用户组件。
 - **元素尺寸**：`use_node_ref` 给出句柄，挂到 `View::node_ref`。`measure_element` 返回 x、y（相对根节点）、width、height，以及去掉边框的 client 尺寸，节点未挂载时全为 0。在 effect 和事件回调里读，读到的是最近一次布局。`use_box_metrics(node_ref)` 返回 width、height、left、top（相对父节点）、client 尺寸和 `has_measured`，布局变化时重渲染调用它的组件。ref 的槽存 `Option<布局>`，`None` 表示未挂载。读者登记在 Store，提交的每一轮刷新 ref 后比较读者上次返回的度量，变了标脏，这一帧写出前重算；布局不变不标脏，空闲时没有提交，也不检查。
 

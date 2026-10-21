@@ -16,11 +16,13 @@ use crate::{
     Color, ColorLevel, Dimension, Display, Element, FlexDirection, RenderOptions, Style, TextWrap,
     layout, paint,
 };
+use context::Contexts;
 use hooks::{Hook, Kind, Value};
 use state::{NodeLayout, RenderGuard, Store};
 
 mod animation;
 mod app_handle;
+mod context;
 mod focus;
 #[cfg(feature = "tokio")]
 mod future;
@@ -190,6 +192,8 @@ struct Instance {
     insertion_deletions: VecDeque<Box<dyn Any>>,
     rendered: bool,
     dirty: Rc<Dirty>,
+    contexts: Contexts,
+    child_contexts: Contexts,
     background: Option<Color>,
     store: Rc<Store>,
     written: usize,
@@ -208,7 +212,7 @@ impl Instance {
         }
     }
 
-    fn new(element: Element, store: &Rc<Store>, parent: Weak<Dirty>) -> Self {
+    fn new(element: Element, store: &Rc<Store>, parent: Weak<Dirty>, contexts: Contexts) -> Self {
         Self {
             element,
             children: Vec::new(),
@@ -218,6 +222,8 @@ impl Instance {
             insertion_deletions: VecDeque::new(),
             rendered: false,
             dirty: Dirty::new(parent),
+            child_contexts: contexts.clone(),
+            contexts,
             background: None,
             store: store.clone(),
             written: 0,
@@ -258,6 +264,8 @@ impl Instance {
                     }
                 }
                 Value::Memo(value) => cleanups.states.push_back(value),
+                Value::Provide(provider) => cleanups.states.push_back(Box::new(provider)),
+                Value::Context(provider) => cleanups.states.push_back(Box::new(provider)),
             }
         }
         for child in &mut self.children {
@@ -418,6 +426,7 @@ impl Runtime {
                 Element::fragment(Vec::<Element>::new()),
                 &store,
                 Weak::new(),
+                Contexts::default(),
             ),
             cleanups: Cleanups::default(),
             next: Some(Element::fragment([element])),
@@ -753,6 +762,7 @@ fn reconcile_children(
                     element.clone(),
                     &instance.store,
                     Rc::downgrade(&instance.dirty),
+                    instance.child_contexts.clone(),
                 )
             });
             // Retain ownership in the tree before user render code can unwind.
@@ -831,6 +841,7 @@ fn reconcile(
                     hooks: &mut instance.hooks,
                     store: &instance.store,
                     dirty: instance.dirty.clone(),
+                    contexts: &instance.contexts,
                     name: component.name,
                     cursor: 0,
                 };
@@ -840,6 +851,15 @@ fn reconcile(
                     "hook order changed in {}",
                     component.name
                 );
+                if !instance.rendered {
+                    for hook in &instance.hooks {
+                        if let (Kind::Provide(kind), Value::Provide(provider)) =
+                            (hook.kind, &hook.value)
+                        {
+                            instance.child_contexts.push(kind, provider.clone());
+                        }
+                    }
+                }
                 changed = true;
                 Some(vec![element])
             } else {
@@ -928,6 +948,11 @@ fn reconcile(
         _ => {}
     }
     instance.rendered = true;
+    // Providers can mark readers during this walk. Clear lanes consumed below.
+    instance
+        .dirty
+        .descendants
+        .set(instance.children.iter().any(|child| child.dirty.pending()));
     instance.pending_static = matches!(&node, Node::Static(value) if instance.written < value.len)
         || instance.children.iter().any(|child| child.pending_static);
     changed

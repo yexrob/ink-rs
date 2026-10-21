@@ -4,6 +4,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use super::animation::{Animation, AnimationOptions, Subscription, Values};
+use super::context::{Contexts, Provider};
 use super::focus::{FocusManager, FocusOptions, FocusRegistration};
 use super::input::{Handler, InputHandler, PasteHandler, Registration};
 use super::output::{CursorCleanup, CursorPosition, OutputStream, OutputWriter};
@@ -18,6 +19,8 @@ pub(super) enum Kind {
     WindowSize,
     NodeRef,
     State(TypeId),
+    Provide(TypeId),
+    Context(TypeId),
     Memo(TypeId, TypeId),
     Callback(TypeId),
     Effect(TypeId),
@@ -42,6 +45,8 @@ pub(super) enum Value {
         slot: StateSlot,
     },
     Memo(Box<dyn Any>),
+    Provide(Rc<Provider>),
+    Context(Option<Rc<Provider>>),
     Effect(Effect),
 }
 
@@ -55,6 +60,7 @@ pub struct Scope<'a> {
     pub(super) hooks: &'a mut Vec<Hook>,
     pub(super) store: &'a Rc<Store>,
     pub(super) dirty: Rc<Dirty>,
+    pub(super) contexts: &'a Contexts,
     pub(super) name: &'static str,
     pub(super) cursor: usize,
 }
@@ -318,6 +324,52 @@ impl Scope<'_> {
             unreachable!()
         };
         *handle.downcast_ref::<State<T>>().expect("state hook type")
+    }
+
+    /// Provides a value to the returned tree, keyed by its type. Use newtypes
+    /// for contexts with the same value type. The nearest ancestor wins;
+    /// among this component's calls for a type, the last call wins.
+    ///
+    /// This component's [`Self::use_context`] reads ancestors, not this value.
+    /// A changed value schedules mounted readers, including those beneath
+    /// components with equal props, for the same commit. Equal values do not.
+    pub fn provide<T: Clone + PartialEq + 'static>(&mut self, value: T) {
+        let kind = Kind::Provide(TypeId::of::<T>());
+        let position = self.position(kind);
+        if position == self.hooks.len() {
+            self.hooks.push(Hook {
+                kind,
+                value: Value::Provide(Provider::new(value)),
+            });
+        } else {
+            let Value::Provide(provider) = &self.hooks[position].value else {
+                unreachable!()
+            };
+            provider.update(value);
+        }
+    }
+
+    /// Clones the nearest ancestor's value of this type, or returns `None`.
+    /// Resolves and subscribes on mount; provider changes schedule this
+    /// component even when its props are equal. Calls to [`Self::provide`]
+    /// in this component do not affect what this hook reads.
+    pub fn use_context<T: Clone + 'static>(&mut self) -> Option<T> {
+        let kind = Kind::Context(TypeId::of::<T>());
+        let position = self.position(kind);
+        if position == self.hooks.len() {
+            let provider = self.contexts.find(TypeId::of::<T>());
+            if let Some(provider) = &provider {
+                provider.add_reader(&self.dirty);
+            }
+            self.hooks.push(Hook {
+                kind,
+                value: Value::Context(provider),
+            });
+        }
+        let Value::Context(provider) = &self.hooks[position].value else {
+            unreachable!()
+        };
+        provider.as_ref().map(|provider| provider.read())
     }
 
     /// Recomputes a value when dependencies change.
