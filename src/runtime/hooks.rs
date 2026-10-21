@@ -9,7 +9,7 @@ use super::input::{Handler, InputHandler, PasteHandler, Registration};
 use super::output::{CursorCleanup, CursorPosition, OutputStream, OutputWriter};
 use super::state::{BoxMetrics, BoxReader, NodeRef, State, StateSlot, Store};
 use super::{AppHandle, Dirty, WindowSize};
-use crate::KeyEvent;
+use crate::{Callback, KeyEvent};
 
 type Setup = Box<dyn FnOnce() -> Box<dyn Any>>;
 
@@ -19,6 +19,7 @@ pub(super) enum Kind {
     NodeRef,
     State(TypeId),
     Memo(TypeId, TypeId),
+    Callback(TypeId),
     Effect(TypeId),
     LayoutEffect(TypeId),
     InsertionEffect,
@@ -348,6 +349,44 @@ impl Scope<'_> {
             self.hooks[position] = hook;
         }
         value
+    }
+
+    /// Returns a pointer-equal callback across renders, calling the closure
+    /// from the latest render. Like Dioxus's `use_callback`, this has no
+    /// dependencies, unlike React's `useCallback`.
+    /// After unmount, the handle calls the last closure; writes to state owned
+    /// by the unmounted component are ignored.
+    pub fn use_callback<A: 'static, R: 'static>(
+        &mut self,
+        f: impl Fn(A) -> R + 'static,
+    ) -> Callback<A, R> {
+        let kind = Kind::Callback(TypeId::of::<fn(A) -> R>());
+        let position = self.position(kind);
+        let next = Callback::new(f);
+        if position == self.hooks.len() {
+            let current = Rc::new(RefCell::new(next));
+            let callback = {
+                let current = current.clone();
+                Callback::new(move |arg| {
+                    let f = current.borrow().clone();
+                    f.call(arg)
+                })
+            };
+            self.hooks.push(Hook {
+                kind,
+                value: Value::Memo(Box::new((current, callback.clone()))),
+            });
+            callback
+        } else {
+            let Value::Memo(value) = &self.hooks[position].value else {
+                unreachable!()
+            };
+            let (current, callback) = value
+                .downcast_ref::<(Rc<RefCell<Callback<A, R>>>, Callback<A, R>)>()
+                .expect("callback hook type");
+            *current.borrow_mut() = next;
+            callback.clone()
+        }
     }
 
     /// Runs after the commit, and after the frame is written when that frame

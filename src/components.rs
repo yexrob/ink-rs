@@ -4,7 +4,7 @@ use std::rc::Rc;
 use crate::{Color, Element, Key, NodeRef, Position, Style, Styled, TextChild, TextWrap};
 
 /// A flexbox container, Ink's `<Box>`. Style it with the [`Styled`] methods.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct View {
     pub(crate) node_ref: Option<NodeRef>,
     pub(crate) style: Style,
@@ -50,7 +50,7 @@ impl Styled for View {
 
 /// Styled text, Ink's `<Text>`. Children are strings, nested `Text`, or
 /// elements that render text.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Text {
     pub(crate) style: TextStyle,
     pub(crate) wrap: TextWrap,
@@ -182,6 +182,12 @@ impl Transform {
     }
 }
 
+impl PartialEq for Transform {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.transform, &other.transform) && self.children == other.children
+    }
+}
+
 impl fmt::Debug for Transform {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Transform")
@@ -226,6 +232,14 @@ impl Static {
 impl Styled for Static {
     fn style_mut(&mut self) -> &mut Style {
         &mut self.style
+    }
+}
+
+impl PartialEq for Static {
+    fn eq(&self, other: &Self) -> bool {
+        self.style == other.style
+            && self.len == other.len
+            && Rc::ptr_eq(&self.render, &other.render)
     }
 }
 

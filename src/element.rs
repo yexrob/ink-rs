@@ -6,10 +6,12 @@ use crate::{Newline, Spacer, Static, Text, Transform, View};
 /// [`Element::fragment`].
 ///
 /// Strings are not elements: as in Ink, text has to live inside a [`Text`].
-#[derive(Clone, Debug, Default)]
+/// Equality is structural down to component boundaries, where component types
+/// and props are compared; functions compare by pointer identity.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Element(pub(crate) Node, pub(crate) Option<Key>);
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) enum Node {
     #[default]
     Empty,

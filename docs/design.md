@@ -48,6 +48,7 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
 ## 编程模型
 
 - **组件**是函数 `fn(&mut Scope, &P) -> Element`，要求 `P: PartialEq`。props 没变时跳过整棵子树，等于默认带 memo。`component(f, props)` 生成组件元素，组件身份按 `f` 的类型区分。
+- **子元素和回调作 props**：`Element` 实现 `PartialEq`，按结构比较到组件边界，组件节点比较类型和 props，Transform 与 Static 的函数按指针比较。回调用 `Callback<A, R>`，按指针比较。`use_callback(f)` 每次渲染返回同一个句柄，调用时执行最近一次渲染传入的闭包；没有依赖数组，同 Dioxus 的 `use_callback`，不同于 React 的 `useCallback`。
 - **比对**同 React：子元素有 key 按 key 对应，没有 key 按位置对应；类型或 key 变了，卸载旧实例、挂载新实例。
 - **hooks** 按调用顺序存放。debug 构建记录每个位置的类型，顺序变化时 panic 并报出组件名。
 - **状态句柄** `State<T>` 对任意 T 都是 `Copy + Send + Sync` 的分代句柄（runtime id、槽位、代数、所属线程 id），读写经线程局部变量找到当前 runtime，放进闭包无需 clone。UI 运行时单线程、`!Send`，在其他线程使用句柄会 panic；其他线程通过 `Clone + Send + Sync` 的 `AppHandle::update(FnOnce() + Send + 'static)` 提交更新。`Scope::use_app()` 与 `Instance::handle()` 返回句柄，core 不保留计数句柄；保留句柄表示有未结束的工作。核心的 FIFO 队列在下一步执行闭包，状态写入与事件回调相同；卸载关闭队列并丢弃闭包，后续 update 也丢弃。`OutputWriter` 同为 `Copy + Send + Sync`，每次写入检查所属线程，离开 UI 线程时 panic。一个线程可以同时运行多个实例。组件卸载后，写它的状态被忽略。

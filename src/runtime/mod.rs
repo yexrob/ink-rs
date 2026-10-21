@@ -96,6 +96,12 @@ pub(crate) struct Component {
     render: Rc<dyn RenderComponent>,
 }
 
+impl PartialEq for Component {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind && self.render.same_props(other.render.as_ref())
+    }
+}
+
 impl fmt::Debug for Component {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Component").field(&self.name).finish()

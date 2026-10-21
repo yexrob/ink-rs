@@ -43,6 +43,7 @@
 
 mod app;
 mod border;
+mod callback;
 mod color;
 mod components;
 mod driver;
@@ -64,6 +65,7 @@ pub mod testing;
 
 pub use app::Options;
 pub use border::{BorderStyle, BoxChars};
+pub use callback::Callback;
 pub use color::{Color, ColorLevel, ParseColorError};
 pub use components::{Newline, Spacer, Static, Text, Transform, View};
 #[cfg(feature = "tokio")]

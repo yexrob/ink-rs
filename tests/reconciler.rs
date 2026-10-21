@@ -19,6 +19,106 @@ fn update_child() {
 }
 
 #[test]
+fn equal_children_props_skip_component_render() {
+    thread_local! {
+        static PARENT_RENDERS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        static RENDERS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+    #[derive(PartialEq)]
+    struct LayoutProps {
+        title: String,
+        children: Element,
+    }
+    fn label(_: &mut Scope, text: &&str) -> Element {
+        Text::new(*text).into()
+    }
+    fn layout(_: &mut Scope, props: &LayoutProps) -> Element {
+        RENDERS.set(RENDERS.get() + 1);
+        View::new()
+            .child(Text::new(&props.title))
+            .child(props.children.clone())
+            .into()
+    }
+    fn parent(_: &mut Scope, props: &(usize, &'static str)) -> Element {
+        PARENT_RENDERS.set(PARENT_RENDERS.get() + 1);
+        component(
+            layout,
+            LayoutProps {
+                title: "Title: ".to_owned(),
+                children: View::new()
+                    .child(Text::new("child "))
+                    .child(component(label, props.1).key("label"))
+                    .into(),
+            },
+        )
+    }
+    PARENT_RENDERS.set(0);
+    RENDERS.set(0);
+    let mut instance = testing::render(component(parent, (0, "A")));
+    assert_eq!(RENDERS.get(), 1);
+    assert_ansi_eq(instance.last_frame(), "Title: child A");
+
+    instance.rerender(component(parent, (1, "A")));
+    assert_eq!(PARENT_RENDERS.get(), 2);
+    assert_eq!(RENDERS.get(), 1);
+    assert_ansi_eq(instance.last_frame(), "Title: child A");
+
+    instance.rerender(component(parent, (2, "B")));
+    assert_eq!(PARENT_RENDERS.get(), 3);
+    assert_eq!(RENDERS.get(), 2);
+    assert_ansi_eq(instance.last_frame(), "Title: child B");
+}
+
+#[test]
+fn use_callback_skips_child_and_calls_latest_closure() {
+    thread_local! {
+        static RENDERS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        static HANDLE: std::cell::RefCell<Option<Callback<(), usize>>> = const { std::cell::RefCell::new(None) };
+    }
+    #[derive(PartialEq)]
+    struct ChildProps {
+        on_change: Callback<(), usize>,
+    }
+    fn child(_: &mut Scope, props: &ChildProps) -> Element {
+        RENDERS.set(RENDERS.get() + 1);
+        HANDLE.with(|handle| *handle.borrow_mut() = Some(props.on_change.clone()));
+        Text::new("value: ").into()
+    }
+    fn owner(cx: &mut Scope, value: &usize) -> Element {
+        let shown = cx.use_state(|| 0);
+        let value = *value;
+        let on_change = cx.use_callback(move |()| {
+            shown.set(value);
+            value
+        });
+        View::new()
+            .child(component(child, ChildProps { on_change }))
+            .child(Text::new(shown.get().to_string()))
+            .into()
+    }
+    RENDERS.set(0);
+    let mut instance = testing::render(component(owner, 1));
+    let callback = HANDLE.with(|handle| handle.borrow_mut().take().unwrap());
+    assert_eq!(RENDERS.get(), 1);
+    assert_ansi_eq(instance.last_frame(), "value: 0");
+    assert_eq!(callback.call(()), 1);
+    instance.settle();
+    assert_eq!(RENDERS.get(), 1);
+    assert_ansi_eq(instance.last_frame(), "value: 1");
+
+    instance.rerender(component(owner, 2));
+    assert_eq!(RENDERS.get(), 1);
+    assert_ansi_eq(instance.last_frame(), "value: 1");
+    assert_eq!(callback.call(()), 2);
+    instance.settle();
+    assert_eq!(RENDERS.get(), 1);
+    assert_ansi_eq(instance.last_frame(), "value: 2");
+
+    instance.unmount();
+    assert_eq!(callback.call(()), 2);
+}
+
+#[test]
 fn update_text_node() {
     fn example(_: &mut Scope, update: &bool) -> Element {
         let labels: &[&str] = if *update {
