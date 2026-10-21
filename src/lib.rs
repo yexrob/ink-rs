@@ -74,7 +74,7 @@ pub use driver::{Instance, render};
 pub use element::{Element, Key, TextChild};
 pub use error::{Error, PanicError, PanicLocation};
 #[cfg(feature = "macros")]
-pub use ink_rs_macros::rsx;
+pub use ink_rs_macros::{Props, rsx};
 pub use input::kitty::{KittyFlags, KittyKeyboard};
 pub use input::{KeyEvent, KeyEventType};
 pub use render::{RenderOptions, render_to_string};

@@ -8,6 +8,52 @@ use syn::{
     Expr, Ident, LitStr, Pat, Path, Result, Token, braced, parenthesized, parse_macro_input,
 };
 
+mod props;
+
+/// Generates component builders for a struct with named fields.
+///
+/// The struct requires `#[props(component = path)]`, naming the component
+/// function passed to `::ink_rs::component`. Each field gets a consuming setter
+/// with the struct's visibility and the field's type and doc comments.
+/// `#[props(into)]` on a field changes its setter argument to `impl Into<T>`.
+///
+/// A field named `children` must be `Vec<Element>`. It gets `child` and `children`
+/// methods accepting elements through `Into<Element>`, like `View`. It cannot
+/// have `#[props(into)]`. Fields named `key` or `child` are reserved.
+///
+/// The derive generates `From<PropsType> for Element` and a `key` method that
+/// returns an `Element`. Both require the props type to be `PartialEq + 'static`.
+/// It preserves generics and where clauses. It does not generate `Default` or
+/// `new`; derive `Default` or write a constructor for positional arguments.
+///
+/// ```ignore
+/// use ink_rs::{Element, Props, Scope, Text, View, rsx};
+///
+/// #[derive(Default, PartialEq, Props)]
+/// #[props(component = layout)]
+/// struct Layout {
+///     #[props(into)]
+///     title: String,
+///     children: Vec<Element>,
+/// }
+///
+/// fn layout(_: &mut Scope, props: &Layout) -> Element {
+///     View::new()
+///         .child(Text::new(&props.title))
+///         .children(props.children.clone())
+///         .into()
+/// }
+///
+/// let tree = rsx! { Layout(title: "Deploy") { Text { "step 1" } } };
+/// ```
+#[proc_macro_derive(Props, attributes(props))]
+pub fn props(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as syn::DeriveInput);
+    props::expand(input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
 /// Builds Ink trees through the public builder API.
 ///
 /// ```text
@@ -21,7 +67,9 @@ use syn::{
 /// ```
 ///
 /// Positional arguments precede named arguments and call `Path::new(...)`.
-/// Without positional arguments, construction uses `<Path>::default()`.
+/// Without positional arguments, construction uses `Path::default()`.
+/// If any path segment has generic arguments, construction uses
+/// `<Path>::new(...)` or `<Path>::default()` instead.
 /// A bare identifier is a positional expression, not a flag: use `bold: true`.
 /// Named arguments call builder methods in order, except `key`, which is
 /// applied after all children. Paths, expressions and method names retain
@@ -39,7 +87,8 @@ use syn::{
 /// escapes; other strings pass through unchanged. Put other expressions in
 /// braces, such as `{format!("{} total", passed + failed)}`. Strings under a
 /// `View` fail the builder's `Into<Element>` bound: text belongs inside `Text`.
-/// Components use expressions such as `{component(f, props)}`.
+/// Components use expressions such as `{component(f, props)}`, or derive
+/// [`Props`] on their props struct to use the element syntax.
 ///
 /// One element or expression root returns its value, retaining its builder
 /// type unless `key` returns an `Element`. Multiple roots use
@@ -263,10 +312,15 @@ impl Node {
                     children: nodes,
                 } = element.as_ref();
                 let b = builder();
-                let constructor = if positional.is_empty() {
-                    quote! { <#path>::default() }
+                let constructor_path = if path.segments.iter().any(|s| !s.arguments.is_empty()) {
+                    quote! { <#path> }
                 } else {
-                    quote! { <#path>::new(#(#positional),*) }
+                    quote! { #path }
+                };
+                let constructor = if positional.is_empty() {
+                    quote! { #constructor_path::default() }
+                } else {
+                    quote! { #constructor_path::new(#(#positional),*) }
                 };
                 let methods = named.iter().filter(|(name, _)| name != "key");
                 let methods = methods.map(|(name, expr)| quote! { let #b = #b.#name(#expr); });

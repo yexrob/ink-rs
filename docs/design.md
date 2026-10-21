@@ -93,7 +93,31 @@ testing 驱动在 M1，同步驱动在 M2，tokio 驱动在 M4。CI 跑一遍 `-
 
 ## 写法
 
-`Box` 与 `std::boxed::Box` 重名，改叫 `View`（同 React Native）。v1 的写法是 builder：rustfmt 能格式化，rust-analyzer 能补全，编译器能检查类型。宏 DSL 是 `rsx!`，作为 builder 的语法糖，能力不超出 builder：`Name(位置参数, 方法: 值) { 子节点 }` 展开为 `Name::new(..)` 或 `<Name>::default()`，再按顺序调用方法，子节点交给 `child`，`key` 最后调用。没有裸标志，写 `bold: true`。子节点可以是元素、字符串、`{表达式}`、`if`、`for`；含 `{` 的字符串展开为 `format!`。`if` 与 `for` 在语句里串接父 builder，各分支不必同类型。多个根节点合成 `Element::fragment`。
+`Box` 与 `std::boxed::Box` 重名，改叫 `View`（同 React Native）。v1 的写法是 builder：rustfmt 能格式化，rust-analyzer 能补全，编译器能检查类型。宏 DSL 是 `rsx!`，作为 builder 的语法糖，能力不超出 builder：`Name(位置参数, 方法: 值) { 子节点 }` 展开为 `Name::new(..)` 或 `Name::default()`，路径带泛型参数时写成 `<Name>::…`，再按顺序调用方法，子节点交给 `child`，`key` 最后调用。没有裸标志，写 `bold: true`。子节点可以是元素、字符串、`{表达式}`、`if`、`for`；含 `{` 的字符串展开为 `format!`。`if` 与 `for` 在语句里串接父 builder，各分支不必同类型。多个根节点合成 `Element::fragment`。
+
+组件在 rsx 里和 `View` 同样写法，靠 props 结构体上的 `#[derive(Props)]`：每个字段生成同名 setter，收字段类型，标 `#[props(into)]` 的收 `impl Into<T>`（整数字面量过不了 `impl Into<u16>`，所以不作默认）；`children: Vec<Element>` 字段生成 `child` 和 `children`；另生成 `key`，以及调用 `#[props(component = f)]` 所指组件函数的 `From<props> for Element`。结构体是数据，组件函数是渲染。派生不生成 `Default` 和 `new`，必填 props 由用户写 `new`，在 rsx 里作位置参数；不检查必填项，不做默认值属性。
+
+```rust
+#[derive(Default, PartialEq, Props)]
+#[props(component = layout)]
+struct Layout {
+    #[props(into)]
+    title: String,
+    children: Vec<Element>,
+}
+
+fn layout(_: &mut Scope, p: &Layout) -> Element {
+    rsx! {
+        View(flex_direction: FlexDirection::Column) {
+            Text(bold: true) { {p.title.clone()} }
+            {p.children.clone()}
+        }
+    }
+    .into()
+}
+
+rsx! { Layout(title: "Deploy") { Text { "step 1" } } }
+```
 
 ```rust
 fn counter(cx: &mut Scope, p: &CounterProps) -> Element {

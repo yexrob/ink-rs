@@ -1,8 +1,8 @@
 #![cfg(feature = "macros")]
 
 use ink_rs::{
-    Color, ColorLevel, Element, FlexDirection, Newline, RenderOptions, Scope, Spacer, Static, Text,
-    Transform, View, component, render_to_string, rsx,
+    Color, ColorLevel, Element, FlexDirection, Newline, Props, RenderOptions, Scope, Spacer,
+    Static, Text, Transform, View, component, render_to_string, rsx,
 };
 
 fn assert_rendered(actual: impl Into<Element>, expected: impl Into<Element>, text: &str) {
@@ -204,4 +204,74 @@ fn keyed_root_and_fragment() {
         Element::from(Text::new("b").child("c")),
     ]);
     assert_rendered(actual, expected, "a\nbc");
+}
+
+#[test]
+fn derived_component_props_children_and_key() {
+    #[derive(Default, PartialEq, Props)]
+    #[props(component = layout)]
+    struct Layout {
+        /// Shown above the children.
+        #[props(into)]
+        title: String,
+        width: u16,
+        children: Vec<Element>,
+    }
+
+    fn layout(_: &mut Scope, props: &Layout) -> Element {
+        use ink_rs::Styled;
+        View::new()
+            .width(props.width)
+            .flex_direction(FlexDirection::Column)
+            .child(Text::new(&props.title))
+            .children(props.children.clone())
+            .into()
+    }
+
+    let actual = rsx! {
+        View {
+            Layout(title: "Deploy", width: 40, key: "main") {
+                Text { "step 1" }
+                Text { "step 2" }
+            }
+        }
+    };
+    let expected = View::new().child(
+        component(
+            layout,
+            Layout {
+                title: "Deploy".into(),
+                width: 40,
+                children: vec![Text::new("step 1").into(), Text::new("step 2").into()],
+            },
+        )
+        .key("main"),
+    );
+    assert_eq!(actual, expected);
+    assert_rendered(actual, expected, "Deploy\nstep 1\nstep 2");
+}
+
+#[test]
+fn inferred_generic_component_props() {
+    #[derive(Default, PartialEq, Props)]
+    #[props(component = select::<T>)]
+    struct Select<T>
+    where
+        T: std::fmt::Display,
+    {
+        items: Vec<T>,
+    }
+
+    fn select<T: std::fmt::Display>(_: &mut Scope, props: &Select<T>) -> Element {
+        Element::fragment(props.items.iter().map(|item| Text::new(item.to_string())))
+    }
+
+    let actual = rsx! { Select(items: vec![1u8, 2, 3]) };
+    let expected = component(
+        select::<u8>,
+        Select {
+            items: vec![1, 2, 3],
+        },
+    );
+    assert_rendered(actual, expected, "1\n2\n3");
 }
