@@ -369,7 +369,9 @@ fn animations_advance_in_debug_mode_when_interactive_is_false() {
     app.advance(ms(25));
     app.unmount();
     // No runtime debug option: non-interactive output is written on unmount.
-    assert_eq!(terminal.writes().concat(), "2\n");
+    // Ticks held by the 8.33 ms window go out when it opens, at 8.33, 16.67
+    // and 25 ms; Ink's lower bound holds.
+    assert_eq!(terminal.writes().concat(), "3\n");
 }
 
 fn delayed(cx: &mut Scope, mount: &bool) -> Element {

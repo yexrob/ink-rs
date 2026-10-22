@@ -53,7 +53,7 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
 - **hooks** 按调用顺序存放。debug 构建记录每个位置的类型，顺序变化时 panic 并报出组件名。
 - **状态句柄** `State<T>` 对任意 T 都是 `Copy + Send + Sync` 的分代句柄（runtime id、槽位、代数、所属线程 id），读写经线程局部变量找到当前 runtime，放进闭包无需 clone。UI 运行时单线程、`!Send`，在其他线程使用句柄会 panic；其他线程通过 `Clone + Send + Sync` 的 `AppHandle::update(FnOnce() + Send + 'static)` 提交更新。`Scope::use_app()` 与 `Instance::handle()` 返回句柄，core 不保留计数句柄；保留句柄表示有未结束的工作。核心的 FIFO 队列在下一步执行闭包，状态写入与事件回调相同；卸载关闭队列并丢弃闭包，后续 update 也丢弃。`OutputWriter` 同为 `Copy + Send + Sync`，每次写入检查所属线程，离开 UI 线程时 panic。一个线程可以同时运行多个实例。组件卸载后，写它的状态被忽略。
 - **写状态**：`set` 要求 `T: PartialEq`，值相等时不触发渲染；`update(|v| ..)` 表示明确修改，标脏。渲染过程中写状态在 debug 下 panic，派生值用 `use_memo`。
-- **调度**：一轮事件处理完，所有更新合并成一次提交：重渲染标脏的组件和 props 变化的子树、比对、布局、执行 `use_layout_effect`。提交不节流；paint 和写出受 `max_fps` 限制（Ink 默认 30，窗口 34ms），同 Ink：窗口内第一次立即写出，其余合并到窗口结束时写出。Static 有新条目、resize、卸载、外部写、`clear()` 不等窗口。
+- **调度**：一轮事件处理完，所有更新合并成一次提交：重渲染标脏的组件和 props 变化的子树、比对、布局、执行 `use_layout_effect`。提交不节流；paint 和写出受 `max_fps` 限制（默认 30），同 Ink：窗口内第一次立即写出，其余合并到窗口结束时写出。窗口是 `1s / max_fps`，不取整；Ink 取 `ceil(1000 / max_fps)` 毫秒，默认 34ms。帧按固定节拍排：一帧比截止时间晚不到半个窗口，下一个截止时间从原截止时间算，系统晚醒不降低平均帧率；晚半个窗口以上，从这一帧重新起格。Ink 从实际写出的时刻算，晚醒累积（见[记录 063](decisions/063-frame-grid.md)）。Static 有新条目、resize、卸载、外部写、`clear()` 不等窗口。
 - **空闲**：没有变化时零唤醒、零渲染，由测试保证。
 - **effect**：`use_layout_effect` 在布局之后、paint 之前执行，可以读元素尺寸，写状态会让这一帧在写出前重算，一帧写出一次。Ink 在提交时写出，之后执行 layout effect，状态变了写第二帧；ink-rs 不写这个中间帧。`use_effect` 在提交之后执行，这一帧没被节流时在写出之后，同 React：passive effect 跟着提交走，不等节流后的写出。清理靠返回值的 `Drop`；组件卸载时它的异步任务随 drop 取消。
 - **context**：`provide(value)` 把值交给组件返回的子树，`use_context::<T>()` 返回最近祖先提供的值，没有时为 `None`。按类型区分，同类型的两个 context 用 newtype。组件读不到自己 provide 的值，同 React 中 Provider 位于返回的树里。两个都是 hook，占调用顺序的位置。实例的祖先和 hook 顺序在它的生命周期内不变，所以 reader 挂载时找到 provider，用 `Dirty` 的弱引用登记。provider 的值变化时标脏 reader，标记向上冒泡，reconcile 穿过 props 相等、被跳过的中间组件，在同一次提交重渲染 reader，不出中间帧；值相等时不触发。
@@ -73,8 +73,8 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
 - `dispatch(event)` 处理一个事件，`render_if_due(now)` 在需要时渲染一帧，返回下一次需要唤醒的时间 `Option<Instant>`，`None` 表示空闲。驱动按这个时间睡眠，空闲零唤醒由它保证。
 - 核心定义唤醒接口。其他线程经 `AppHandle` 提交更新，或 UI 线程上的任务写 `State`，两种情况通过它叫醒驱动。
 - 调度规则（批量更新、`max_fps`、空闲零唤醒）写在核心里，与驱动无关。测试驱动手动推进循环和假时钟。
-- **动画**：所有 `use_animation` 共用 Store 中的一个调度表，同 Ink App 的共享定时器。订阅从最近一步的时间开始，核心不读时钟。每步开头 tick：到期的条目按 Ink 的追赶公式 `start + (floor(elapsed / interval) + 1) * interval` 前移，迟到的唤醒跳过错过的格点，`frame` 随之跳变；距上次交付不足一个节流窗口的条目不写状态。截止时间是各条目在 `max(next_due, last_render + 窗口)` 之后的第一个格点的最小值，节流窗口内的唤醒不发生。tick 经 `State::set` 写值。暂停、改 interval、`reset` 释放订阅，恢复时在 layout effect 中归零并重新订阅，归零值在同一帧写出。`testing::render` 与 `render_to_string` 用 0 窗口。
-- app 管理节流窗口，runtime 不保存节流窗口：动画的 tick 与截止时间按 app 每步传入的窗口计算。Static 有新条目或身份改变时，提交后的绘制满足待绘制帧，但不打开或延长窗口。`max_fps = 0` 使用 0ms 窗口，同 Ink 的非正值分支。
+- **动画**：所有 `use_animation` 共用 Store 中的一个调度表，同 Ink App 的共享定时器。订阅从最近一步的时间开始，核心不读时钟。每步开头 tick：到期的条目按 Ink 的追赶公式 `start + (floor(elapsed / interval) + 1) * interval` 前移，迟到的唤醒跳过错过的格点，`frame` 随之跳变；条目记一个格点锚，未到「锚 + 窗口」的条目不写状态；交付时取这次 tick 的 interval 格点，比门槛晚不到半个窗口时锚前移一个窗口，否则锚取这个格点。格点不含晚醒，晚醒不降低帧率，interval 大于窗口的动画也不会因锚漂移丢 tick。Ink 的门槛是距上次交付一个窗口。截止时间是各条目在 `max(next_due, 锚 + 窗口)` 之后的第一个格点的最小值，节流窗口内的唤醒不发生。tick 经 `State::set` 写值。暂停、改 interval、`reset` 释放订阅，恢复时在 layout effect 中归零并重新订阅，归零值在同一帧写出。`testing::render` 与 `render_to_string` 用 0 窗口。
+- app 管理节流窗口，runtime 不保存节流窗口：动画的 tick 与截止时间按 app 每步传入的窗口计算。Static 有新条目或身份改变时，提交后的绘制满足待绘制帧，但不打开或延长窗口。`max_fps = 0` 使用 0 窗口，同 Ink 的非正值分支。
 
 驱动有三个：
 

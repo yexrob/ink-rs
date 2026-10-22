@@ -68,6 +68,9 @@ struct Entry {
     interval: Duration,
     start: Instant,
     next_due: Instant,
+    /// The grid slot of the last delivered tick; the next tick waits a
+    /// throttle window from here.
+    slot: Instant,
     last_render: Instant,
     values: State<Values>,
 }
@@ -97,6 +100,7 @@ impl Subscription {
                     interval,
                     start,
                     next_due: start + interval,
+                    slot: start,
                     last_render: start,
                     values,
                 },
@@ -122,7 +126,10 @@ impl Runtime {
             animations.now = Some(now);
             let mut writes = Vec::new();
             for entry in animations.entries.values_mut() {
-                if now < entry.next_due {
+                let due = entry.slot + throttle;
+                // A tick held by the window stays due and goes out when the
+                // window opens; Ink drops it and waits for the next one.
+                if now < entry.next_due || now < due {
                     continue;
                 }
                 let elapsed = now - entry.start;
@@ -130,9 +137,9 @@ impl Runtime {
                 // Ink App.tsx advances from start + (floor(elapsed / interval) + 1)
                 // * interval. The remainder form avoids multiplying a tick count.
                 entry.next_due = now + (entry.interval - remainder);
-                if now < entry.last_render + throttle {
-                    continue;
-                }
+                // The interval slot leaves wake-up latency out, so an interval
+                // longer than the window never drifts into skipping ticks.
+                entry.slot = keep_slot(due, now - remainder, throttle);
                 writes.push((
                     entry.values,
                     Values {
@@ -158,17 +165,19 @@ impl Runtime {
             .borrow()
             .entries
             .values()
-            .map(|entry| {
-                let earliest = entry.next_due.max(entry.last_render + throttle);
-                let remainder = duration_remainder(earliest - entry.start, entry.interval);
-                // Keep Ink's delivered ticks, but omit wakes inside the throttle window.
-                if remainder.is_zero() {
-                    earliest
-                } else {
-                    earliest + (entry.interval - remainder)
-                }
-            })
+            .map(|entry| entry.next_due.max(entry.slot + throttle))
             .min()
+    }
+}
+
+/// Where the grid of a frame that was due at `due` and came at `at` stays:
+/// late by less than half a window, the frame keeps its slot, so wake-up
+/// latency does not lower the rate; later, the grid restarts at `at`.
+pub(crate) fn keep_slot(due: Instant, at: Instant, window: Duration) -> Instant {
+    if at.saturating_duration_since(due) < window / 2 {
+        due
+    } else {
+        at
     }
 }
 

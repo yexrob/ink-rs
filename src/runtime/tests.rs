@@ -74,7 +74,8 @@ fn animation_deadline_is_the_minimum_and_none_without_active_subscriptions() {
     assert_eq!(runtime.animation_deadline(Duration::ZERO), None);
     runtime.rerender(component(example, [true; 2]));
     assert_eq!(runtime.render_if_due(now, |_| {}), Some(now + ms(50)));
-    assert_eq!(runtime.animation_deadline(ms(101)), Some(now + ms(150)));
+    // A tick held by the window goes out when the window opens.
+    assert_eq!(runtime.animation_deadline(ms(101)), Some(now + ms(101)));
 
     // Ink's tickAsync test visits every slot. A late core step must also skip
     // missed slots and retain their elapsed delta rather than replaying ticks.
@@ -84,7 +85,9 @@ fn animation_deadline_is_the_minimum_and_none_without_active_subscriptions() {
         Some(now + ms(240))
     );
     assert_eq!(output, "4,2,220,220");
-    assert_eq!(runtime.animation_deadline(ms(101)), Some(now + ms(350)));
+    // The window counts from each tick's slot, not the late step: b ticked
+    // in its 160 ms slot.
+    assert_eq!(runtime.animation_deadline(ms(101)), Some(now + ms(261)));
     runtime.rerender(component(example, [false, true]));
     assert_eq!(
         runtime.render_if_due(now + ms(220), |_| {}),

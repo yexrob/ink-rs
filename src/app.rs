@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use crate::output::Output;
 use crate::paint::{Cell, Frame, serialize_row};
-use crate::runtime::{ExitResult, Runtime, UpdateQueue, WriteDestination};
+use crate::runtime::{ExitResult, Runtime, UpdateQueue, WriteDestination, keep_slot};
 use crate::terminal::Terminal;
 use crate::text::ansi::{Token, tokenize};
 use crate::{
@@ -30,8 +30,10 @@ pub struct Options {
     pub suspend_on_ctrl_z: bool,
     /// Opt-in kitty keyboard negotiation. Defaults to [`KittyKeyboard::Disabled`].
     pub kitty_keyboard: KittyKeyboard,
-    /// Paint rate limit, default 30. The window is ceil(1000 / max_fps)
-    /// milliseconds; zero uses a zero-millisecond window, matching Ink.
+    /// Paint rate limit in frames per second, default 30. Frames keep to a
+    /// grid of 1 / max_fps seconds: a frame woken late by less than half a
+    /// window keeps its slot, so wake-up latency does not lower the rate.
+    /// Zero uses a zero window, matching Ink.
     pub max_fps: u32,
     /// Override interactive mode. `None` means stdout is a TTY and not in CI.
     pub interactive: Option<bool>,
@@ -541,11 +543,11 @@ impl App {
             exit_result: None,
             destination,
             interactive,
-            window: Duration::from_millis(if options.max_fps == 0 {
-                0
+            window: if options.max_fps == 0 {
+                Duration::ZERO
             } else {
-                u64::from(1000_u32.div_ceil(options.max_fps))
-            }),
+                Duration::from_secs(1) / options.max_fps
+            },
             deadline: None,
             pending: false,
             resize_from: None,
@@ -613,7 +615,10 @@ impl App {
         if immediate || due {
             self.paint();
             if !immediate {
-                self.deadline = Some(now + self.window);
+                let slot = self
+                    .deadline
+                    .map_or(now, |deadline| keep_slot(deadline, now, self.window));
+                self.deadline = Some(slot + self.window);
             }
         }
         let runtime = self.runtime.as_mut().unwrap();

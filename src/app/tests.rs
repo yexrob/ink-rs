@@ -1,8 +1,12 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use super::App;
 use crate::testing::{TestTerminal, mount};
-use crate::{Element, Error, Options, Scope, Static, Text, Transform, View, component};
+use crate::{
+    AnimationOptions, ColorLevel, Element, Error, Options, Scope, Static, Text, Transform, View,
+    component,
+};
 
 struct FailOnDrop(&'static str);
 
@@ -295,4 +299,45 @@ fn disabling_suspend_on_ctrl_z_passes_the_key_to_input() {
     assert_eq!(inputs.len(), 1);
     assert_eq!(inputs[0].0, "z");
     assert!(inputs[0].1.ctrl);
+}
+
+#[test]
+fn late_wakes_keep_the_frame_rate() {
+    // A real timer wakes late; the fake clock of TestApp never does.
+    fn clock(cx: &mut Scope, interval: &u64) -> Element {
+        let clock = cx.use_animation(AnimationOptions {
+            interval: Duration::from_millis(*interval),
+            active: true,
+        });
+        Text::new(clock.frame.to_string()).into()
+    }
+    // Intervals at or below the 8.33 ms window fill every 120 fps slot; a
+    // 9 ms one ticks 111 times.
+    for (interval, frames) in [(1, 120), (8, 120), (9, 111)] {
+        let terminal = TestTerminal::new(100, 24);
+        let start = Instant::now();
+        let options = Options {
+            max_fps: 120,
+            ..Options::default()
+        };
+        let mut app = App::new(
+            component(clock, interval),
+            options,
+            Box::new(terminal.clone()),
+            true,
+            ColorLevel::Basic,
+            start,
+        );
+        let mut now = start;
+        while let Some(due) = app.render_if_due(now)
+            && due < start + Duration::from_secs(1)
+        {
+            now = due.max(now) + Duration::from_millis(2);
+        }
+        let written = terminal.writes().len();
+        assert!(
+            written.abs_diff(frames) <= 1,
+            "{written} frames at a {interval} ms interval"
+        );
+    }
 }
