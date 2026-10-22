@@ -98,6 +98,26 @@ struct AppOutput {
     last_frame: Option<Frame>,
     last_cursor: Option<(usize, usize)>,
     control: Vec<(OutputStream, Vec<u8>)>,
+    recorder: Option<Rc<RefCell<FrameRecorder>>>,
+}
+
+#[derive(Default)]
+pub(crate) struct FrameRecorder {
+    pub(crate) live_frame: String,
+    pub(crate) static_rows: Vec<String>,
+}
+
+impl FrameRecorder {
+    fn record(&mut self, frame: &Frame) {
+        self.live_frame = frame
+            .live
+            .iter()
+            .map(|row| serialize_row(row))
+            .collect::<Vec<_>>()
+            .join("\n");
+        self.static_rows
+            .extend(frame.static_lines.iter().map(|row| serialize_row(row)));
+    }
 }
 
 impl AppOutput {
@@ -158,6 +178,9 @@ impl AppOutput {
         cursor: Option<CursorPosition>,
         resize: Option<WindowSize>,
     ) {
+        if let Some(recorder) = &self.recorder {
+            recorder.borrow_mut().record(&frame);
+        }
         let mut bytes = Vec::new();
         if self.interactive {
             if let Some(previous) = resize {
@@ -356,6 +379,12 @@ pub(crate) struct App {
 }
 
 impl App {
+    pub(crate) fn record_frames(&mut self) -> Rc<RefCell<FrameRecorder>> {
+        let recorder = Rc::new(RefCell::new(FrameRecorder::default()));
+        self.destination.borrow_mut().recorder = Some(recorder.clone());
+        recorder
+    }
+
     pub(crate) fn is_suspended(&self) -> bool {
         self.api_suspended || self.stop_suspended
     }
@@ -522,6 +551,7 @@ impl App {
             last_frame: None,
             last_cursor: None,
             control: Vec::new(),
+            recorder: None,
         }));
         // Ink initKittyKeyboard follows setAlternateScreen, before the first frame.
         let mut kitty_query = None;

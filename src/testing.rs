@@ -5,7 +5,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use crate::app::{App, Reason, resolve_interactive};
+use crate::app::{App, FrameRecorder, Reason, resolve_interactive};
 use crate::paint::{Frame, serialize_row};
 use crate::runtime::{Runtime, WriteDestination};
 use crate::terminal::Terminal;
@@ -313,15 +313,18 @@ impl Terminal for TestTerminal {
 pub fn mount(element: impl Into<Element>, options: Options, terminal: &TestTerminal) -> TestApp {
     let interactive = resolve_interactive(options.interactive, false, terminal.is_tty());
     let now = Instant::now();
+    let mut app = App::new(
+        element.into(),
+        options,
+        Box::new(terminal.clone()),
+        interactive,
+        options.color_level.unwrap_or(ColorLevel::Basic),
+        now,
+    );
+    let recorder = app.record_frames();
     let mut app = TestApp {
-        app: App::new(
-            element.into(),
-            options,
-            Box::new(terminal.clone()),
-            interactive,
-            options.color_level.unwrap_or(ColorLevel::Basic),
-            now,
-        ),
+        app,
+        recorder,
         now,
         terminal: terminal.clone(),
     };
@@ -332,11 +335,37 @@ pub fn mount(element: impl Into<Element>, options: Options, terminal: &TestTermi
 /// A live app driven by a fake clock. Drop unmounts and restores the terminal.
 pub struct TestApp {
     app: App,
+    recorder: Rc<RefCell<FrameRecorder>>,
     now: Instant,
     terminal: TestTerminal,
 }
 
 impl TestApp {
+    /// The live frame from the latest paint, excluding Static rows in both
+    /// inline and alternate-screen modes. Empty before the first paint.
+    /// Rows use the same serialization as [`TestInstance::last_frame`],
+    /// joined by `\n` with SGR sequences preserved.
+    /// Steps paint when the frame throttle allows; call [`Self::advance`]
+    /// after input to see the result.
+    /// Does not expose cursor position, structured colors, external writes
+    /// through `use_stdout` or `use_stderr`, or images and other `write_control` bytes.
+    pub fn live_frame(&self) -> String {
+        self.recorder.borrow().live_frame.clone()
+    }
+
+    /// Every Static row from paints since mount, in write order. History
+    /// survives Static identity changes and alternate-screen viewport clipping.
+    /// Empty before the first paint. Rows use the same serialization as
+    /// [`TestInstance::last_frame`], joined by `\n` with SGR sequences preserved
+    /// and no added trailing newline.
+    /// Steps paint when the frame throttle allows; call [`Self::advance`]
+    /// after input to see the result.
+    /// Does not expose cursor position, structured colors, external writes
+    /// through `use_stdout` or `use_stderr`, or images and other `write_control` bytes.
+    pub fn static_output(&self) -> String {
+        self.recorder.borrow().static_rows.join("\n")
+    }
+
     /// Hands over the terminal until [`Self::resume_terminal`].
     /// Rejects a queued or active API suspension.
     pub fn suspend_terminal(&mut self) -> Result<(), crate::AlreadySuspended> {
