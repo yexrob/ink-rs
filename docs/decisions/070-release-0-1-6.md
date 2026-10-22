@@ -1,8 +1,8 @@
 # 发布 0.1.6
 
 - 日期：2026-10-22
-- 状态：实施中
-- 提交：无
+- 状态：已实施
+- 提交：`6b746dd` chore: release 0.1.6
 - Brief：无，主 agent 自己做
 
 ## 背景
@@ -33,3 +33,11 @@
 3. 推送 main，等 CI。
 4. 打 `v0.1.6` 标签并推送，`cargo publish -p ink-rs`。
 5. 推送 eink-rs 的 main。
+
+## 结果
+
+- `6b746dd` 升版本号，排在 069 的结果 `35fcdc4` 和本记录 `0aabeb1` 之后。
+- 本地：fmt、两套 feature 的 clippy 通过；默认 feature 1347 个、`--no-default-features` 1313 个测试通过；`cargo publish --dry-run` 通过。
+- 推送 main（`3f92733..6b746dd`），CI 运行 39749566609 的 7 个 job 通过。
+- `v0.1.6` 标签打在 `6b746dd`，同 v0.1.5 为轻量标签；`cargo publish -p ink-rs` 发布 0.1.6。`ink-rs-macros` 维持 0.1.1。
+- eink-rs 的 main 推送到 `f2afa96`（`b92078b..f2afa96`）。eink-rs 升级依赖放在它的记录 023 里。
