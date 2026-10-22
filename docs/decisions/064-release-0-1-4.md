@@ -16,6 +16,9 @@
   - 只发 `ink-rs` 0.1.4。`ink-rs-macros` 自 0.1.1 起没有改动，不发。
   - 升补丁版本：API 不变，改的是 `max_fps` 的节拍与动画交付的时机，同 0.1.3 改输入解析的处理。
   - 顺序同 [062](062-release-0-1-3.md)，在推送前加用户验收：本地全量、`cargo publish --dry-run`、用户验收、推送 main、等 CI 全部通过、打 `v0.1.4` 标签、`cargo publish -p ink-rs`。不建 GitHub Release。
+- 验收中用户加了两项，推送前再交给用户验收一次：
+  - 帧率示例随 0.1.4 发布，见 [065](065-frame-rate-example.md)。用户定（「两个都要」）。
+  - `Cargo.lock` 里的 tokio 从 1.54.0 升到 1.54.1，单独提交。用户定（选「升到 1.54.1」）。起因：`cargo publish --dry-run` 警告 1.54.0 被撤回。`Cargo.toml` 要求 `1.54`，下游解析到 1.54.1，受影响的是本仓库的 CI 和测试。
 
 ## 方案
 
@@ -24,8 +27,9 @@
 1. 升版本号和 `Cargo.lock`，单独提交。
 2. 本地 fmt、两套 feature 的 clippy、全量测试、`cargo publish --dry-run -p ink-rs`。
 3. 交给用户验收：改动清单、tmux 里的 demo 与测帧程序。用户通过前不推送。
-4. 推送 main，等 CI 的 7 个 job。
-5. 打 `v0.1.4` 标签并推送，`cargo publish -p ink-rs`。
+4. 用户加的两项：tokio 升级、帧率示例（065）。本地全量与 dry-run 重跑，再交给用户验收。
+5. 推送 main，等 CI 的 7 个 job。
+6. 打 `v0.1.4` 标签并推送，`cargo publish -p ink-rs`。
 
 ## 结果
 
