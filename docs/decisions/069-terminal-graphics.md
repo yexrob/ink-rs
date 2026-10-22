@@ -1,8 +1,8 @@
 # 终端图形原语：回复解析、`use_graphics` 探测与 `write_passthrough`
 
 - 日期：2026-10-22
-- 状态：实施中
-- 提交：无
+- 状态：已实施
+- 提交：fd5764a、14f1136、7f88704、97b11ed、56f1a54
 - Brief：[terminal-graphics](briefs/terminal-graphics.md)
 
 ## 背景
@@ -62,3 +62,35 @@
 5. 补本记录的结果，删 worktree 和分支。发布 0.1.6 新开一条记录，等用户同意。eink-rs 的 `Image` 组件和 Markdown 接入在 eink-rs 的记录 023。
 
 已知限制：herdr 里跑 tmux、tmux 里跑 herdr 这两种嵌套，程序识别不出，结果可能不对。
+
+## 结果
+
+Codex 交回三项原语，brief 列出的测试通过。主 agent review 后改了三处，按原语分三次提交，文档和一处 API 调整各一次提交：
+
+- **fd5764a 字符串序列**：按 Codex 的实现合入。事件是 `InputEvent::StringSequence`。载荷限于可打印 ASCII（0x20–0x7e），以 BEL 或 ST 结尾；遇到别的字节时这次尝试作废，按按键解析。没有终结符时沿用 20 ms 超时：交出 ESC 加引导符，余下的字节经 `Runtime::input` 按普通输入解析。
+- **14f1136 `write_passthrough`**：Codex 把 tmux 标记放在 Store，由 `configure_graphics` 设置。主 agent 改为 `WriteDestination::write_control` 带 `outer` 参数，`AppOutput` 入队时按 `Terminal::tmux()` 包裹：在不在 tmux 里是终端的属性，Store 少一个字段，图形配置不管透传。
+- **7f88704 `use_graphics`**：
+  - 探测状态是 Store 上的 `GraphicsState`。hook 登记请求，`render_if_due` 切换 raw mode 之后经 Terminal 写三条查询，截止时间并入唤醒时间。`invalidate_window_size` 改为按 hook 种类的 `invalidate_readers`。
+  - Unix 的 `size()` 返回带像素尺寸的 `TerminalSize`，`ProcessTerminal` 缓存像素尺寸。
+  - Codex 让探测期间没有输入持有者时 Ctrl+C、Ctrl+Z 不起作用。主 agent 改为按选项生效：raw mode 关掉了 ISIG，不处理的话，探测的这段时间里按 Ctrl+C 没有反应。对应的测试改了一处断言，加 `ctrl_c_exits_during_the_probe`。
+  - `Registration::drop` 和 `graphics_probing` 共用 `GraphicsState::probing`。
+- **97b11ed 文档**：`docs/design.md`「终端输出」加透传写入，「输入」加字符串序列和图形探测，生产 Terminal 一段加像素尺寸。
+- **56f1a54 `GraphicsSupport` 加 `#[non_exhaustive]`**：用户说「不支持kitty的终端就先直接退化成alt」，留出加别的协议的余地。发布后加这个属性是破坏性变更。
+- **测试**：保留 Codex 加的测试，它们覆盖 brief 列出的行为：解析器 5 个，透传包裹 1 个，app 1 个（tmux 包裹、驱动的像素尺寸优先、未知时回退），环境判断 1 个，`tests/graphics.rs` 7 个；主 agent 加 1 个。
+- **检查**：fmt；默认、`--no-default-features` 和 `x86_64-pc-windows-msvc` 的 clippy；全量测试默认 feature 1347 个、`--no-default-features` 1313 个，没有失败。
+
+手测用 scratchpad 里的 `graphics-check`：探测，按 4096 字节分块发 RGB 渐变，画占位符；`--input` 下按 `s` 把图片复制进 `Static`，按键写进日志。
+
+| 环境 | 结果 | 单元格像素 | 耗时 |
+|---|---|---|---|
+| Ghostty 直连 | Kitty | 18×40 | 5 ms |
+| tmux 3.6b，Ghostty 客户端 | Kitty | 18×40 | 3 ms |
+| herdr 0.9.5 | Kitty | 18×40 | 3–7 ms |
+| tmux 3.6b，没有客户端 | Unsupported（1 秒超时） | 16×32 | 1008 ms |
+
+- 三个环境里图片显示正确：Ghostty 和 herdr 有截图，tmux 由用户确认（「tmux 有。」）。tmux 里外层终端对透传查询的回复回到了程序，背景里待实测的一点有了答案。
+- herdr 里 1200×600 的图分 704 块发送，显示正确；`Static` 里的副本进入 scrollback 后保留图片。
+- 按键日志里是用户打的字，没有回复字节；屏幕上没有回显的回复。tmux 里 Alt+P、Alt+_ 作为 Alt 键送达。
+- 探测期间的 Ctrl+C 没有手测：探测在 3–7 ms 内结束，由 `ctrl_c_exits_during_the_probe` 覆盖。
+
+worktree 和分支 `ink-graphics` 删除了。发布见 [070](070-release-0-1-6.md)。
