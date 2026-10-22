@@ -417,7 +417,7 @@ impl Runtime {
             },
             false,
         );
-        let store = Store::new();
+        let store = Store::new(options.color_level);
         store.window_size.set(WindowSize {
             columns: options.columns,
             rows: 24,
@@ -469,7 +469,7 @@ impl Runtime {
     }
 
     pub(crate) fn cursor(&self) -> Option<CursorPosition> {
-        self.instance.store.cursor.get()
+        self.instance.store.cursor.get()?.resolve()
     }
 
     pub(crate) fn begin_unmount(&mut self) {
@@ -606,18 +606,29 @@ impl Runtime {
                 // positions for Yoga's extent rounding, as paint's walk does.
                 let mut absolute = Point::ZERO;
                 let mut origin = Point { x: 0, y: 0 };
+                let mut scroll = Point { x: 0, y: 0 };
                 let mut measured = None;
                 for ancestor in path.into_iter().rev() {
                     let (layout, next_absolute) = layout::get(&self.tree, ancestor, absolute);
                     absolute = next_absolute;
                     origin.x += layout.location.x as i32;
                     origin.y += layout.location.y as i32;
+                    if ancestor != node {
+                        let style = &self.tree.props(ancestor).style;
+                        scroll.x += i32::from(style.content_offset_x);
+                        scroll.y += i32::from(style.content_offset_y);
+                    }
                     measured = Some(layout);
                 }
                 let layout = measured.expect("bound node has a layout path");
                 node_ref.refresh(Some(NodeLayout {
                     left: layout.location.x as i32,
                     top: layout.location.y as i32,
+                    // Metrics exclude scrolling; paint subtracts ancestor offsets.
+                    paint_origin: Point {
+                        x: origin.x - scroll.x,
+                        y: origin.y - scroll.y,
+                    },
                     metrics: ElementMetrics {
                         x: origin.x,
                         y: origin.y,

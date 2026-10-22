@@ -7,10 +7,10 @@ use super::animation::{Animation, AnimationOptions, Subscription, Values};
 use super::context::{Contexts, Provider};
 use super::focus::{FocusManager, FocusOptions, FocusRegistration};
 use super::input::{Handler, InputHandler, PasteHandler, Registration};
-use super::output::{CursorCleanup, CursorPosition, OutputStream, OutputWriter};
+use super::output::{CursorCleanup, CursorDeclaration, CursorPosition, OutputStream, OutputWriter};
 use super::state::{BoxMetrics, BoxReader, NodeRef, State, StateSlot, Store};
 use super::{AppHandle, Dirty, WindowSize};
-use crate::{Callback, KeyEvent};
+use crate::{Callback, ColorLevel, KeyEvent};
 
 type Setup = Box<dyn FnOnce() -> Box<dyn Any>>;
 
@@ -180,6 +180,14 @@ impl Scope<'_> {
         self.store.window_size.get()
     }
 
+    /// Returns the colour level this app paints at: [`crate::Options::color_level`],
+    /// or the level the driver detected. Colours chosen by a component are
+    /// degraded to this level when painted. The level is fixed for the app's life;
+    /// this hook does not schedule work.
+    pub fn use_color_level(&mut self) -> ColorLevel {
+        self.store.color_level
+    }
+
     /// Probes for kitty graphics with Unicode placeholders on the first call.
     /// Changes to support or cell pixel size schedule this component. The probe
     /// runs once per app; non-interactive, non-TTY, string and debug renders
@@ -229,6 +237,21 @@ impl Scope<'_> {
     /// a component that skips rendering retains its previous declaration.
     /// Unmount clears the shared cursor. Debug and string rendering ignore it.
     pub fn use_cursor(&mut self, position: Option<CursorPosition>) {
+        self.declare_cursor(position.map(CursorDeclaration::Frame));
+    }
+
+    /// Declares the terminal cursor at `position` cells from the border-box
+    /// top-left of the View `node` is attached to. Padding and borders are the
+    /// caller's to add. The position resolves from the frame being painted,
+    /// so the cursor follows ancestor movement in the same frame.
+    /// `None`, or a node with no layout, hides it. Shares [`Self::use_cursor`]'s
+    /// slot, commit, skipped-render and unmount rules; the last commit wins.
+    /// Debug and string rendering ignore it.
+    pub fn use_node_cursor(&mut self, node: NodeRef, position: Option<CursorPosition>) {
+        self.declare_cursor(position.map(|position| CursorDeclaration::Node(node, position)));
+    }
+
+    fn declare_cursor(&mut self, position: Option<CursorDeclaration>) {
         let index = self.position(Kind::InsertionEffect);
         let store = self.store.clone();
         let setup: Setup = Box::new(move || {

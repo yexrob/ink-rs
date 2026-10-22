@@ -7,6 +7,41 @@ use ink_rs::testing::{TestTerminal, mount};
 use ink_rs::*;
 
 #[test]
+fn use_color_level_reads_render_and_mount_options() {
+    fn level(cx: &mut Scope, _: &()) -> Element {
+        Text::new(format!("{:?}", cx.use_color_level())).into()
+    }
+
+    for color_level in [
+        ColorLevel::None,
+        ColorLevel::Basic,
+        ColorLevel::Ansi256,
+        ColorLevel::TrueColor,
+    ] {
+        let expected = format!("{color_level:?}");
+        let app = testing::render_with(
+            component(level, ()),
+            RenderOptions {
+                color_level,
+                ..RenderOptions::default()
+            },
+        );
+        assert_eq!(app.last_frame(), expected);
+
+        let terminal = TestTerminal::new(100, 24);
+        let _app = mount(
+            component(level, ()),
+            Options {
+                color_level: Some(color_level),
+                ..Options::default()
+            },
+            &terminal,
+        );
+        assert_eq!(Screen::new(&terminal, 100, 24).rows()[0], expected);
+    }
+}
+
+#[test]
 fn use_input_ignore_input_if_not_active() {
     thread_local! { static HANDLE: std::cell::RefCell<Option<AppHandle>> = const { std::cell::RefCell::new(None) }; }
     let terminal = TestTerminal::new(100, 24);

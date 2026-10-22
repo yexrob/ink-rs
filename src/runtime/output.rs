@@ -1,7 +1,7 @@
 use std::rc::Rc;
 use std::thread::{self, ThreadId};
 
-use super::state::{Store, assert_not_rendering, resolve_store};
+use super::state::{NodeRef, Store, assert_not_rendering, resolve_store};
 
 pub(crate) fn passthrough(bytes: &[u8], tmux: bool) -> Vec<u8> {
     if !tmux {
@@ -26,6 +26,27 @@ pub struct CursorPosition {
     pub x: usize,
     /// Row in the live frame.
     pub y: usize,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum CursorDeclaration {
+    Frame(CursorPosition),
+    Node(NodeRef, CursorPosition),
+}
+
+impl CursorDeclaration {
+    pub(super) fn resolve(self) -> Option<CursorPosition> {
+        match self {
+            Self::Frame(position) => Some(position),
+            Self::Node(node, position) => {
+                let origin = node.layout()?.paint_origin;
+                Some(CursorPosition {
+                    x: position.x.saturating_add_signed(origin.x as isize),
+                    y: position.y.saturating_add_signed(origin.y as isize),
+                })
+            }
+        }
+    }
 }
 
 /// The destination stream of an external write.

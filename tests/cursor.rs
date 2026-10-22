@@ -31,6 +31,84 @@ fn flush(app: &mut testing::TestApp) {
     app.advance(Duration::from_millis(34));
 }
 
+#[test]
+fn node_cursor_follows_ancestor_movement_in_the_same_paint() {
+    fn prompt(cx: &mut Scope, _: &()) -> Element {
+        let expanded = cx.use_state(|| false);
+        let node = cx.use_node_ref();
+        cx.use_input(true, move |_, _| expanded.set(true));
+        cx.use_node_cursor(node, Some(CursorPosition { x: 2, y: 2 }));
+        View::new()
+            .flex_direction(FlexDirection::Column)
+            .child(Static::new(vec![()], |_, _| Text::new("History").into()))
+            .child(Text::new(if expanded.get() { "A\nB" } else { "A" }))
+            .child(
+                View::new().padding_left(3).child(
+                    View::new()
+                        .node_ref(node)
+                        .border_style(BorderStyle::Single)
+                        .padding(1)
+                        .child(Text::new("Prompt")),
+                ),
+            )
+            .into()
+    }
+
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(
+        component(prompt, ()),
+        Options {
+            max_fps: 0,
+            ..Options::default()
+        },
+        &terminal,
+    );
+    assert_cursor(&terminal, 24, 4, 5);
+    let before = terminal.writes().len();
+    app.input("x");
+    let writes = terminal.writes();
+    assert_eq!(writes.len(), before + 1);
+    assert!(writes[before].contains("\x1b[6G"));
+    assert_cursor(&terminal, 24, 5, 5);
+    assert!(Screen::new(&terminal, 100, 24).rows()[5].contains("Prompt"));
+}
+
+#[test]
+fn node_cursor_hides_when_node_unmounts_but_declarer_stays() {
+    fn prompt(cx: &mut Scope, _: &()) -> Element {
+        let show = cx.use_state(|| true);
+        let node = cx.use_node_ref();
+        cx.use_input(true, move |_, _| show.set(false));
+        cx.use_node_cursor(node, Some(CursorPosition { x: 2, y: 0 }));
+        View::new()
+            .child(if show.get() {
+                Element::from(View::new().node_ref(node).child(Text::new("Prompt")))
+            } else {
+                Text::new("Waiting").into()
+            })
+            .into()
+    }
+
+    let terminal = TestTerminal::new(100, 24);
+    let mut app = mount(
+        component(prompt, ()),
+        Options {
+            max_fps: 0,
+            ..Options::default()
+        },
+        &terminal,
+    );
+    assert_cursor(&terminal, 24, 0, 2);
+    let before = terminal.writes().len();
+    app.input("x");
+    let output = terminal.writes()[before..].join("");
+    assert!(output.contains("\x1b[?25l"));
+    assert!(!output.contains("\x1b[?25h"));
+    let screen = Screen::new(&terminal, 100, 24);
+    assert!(!screen.cursor_visible());
+    assert_eq!(screen.rows()[0], "Waiting");
+}
+
 fn assert_cursor(terminal: &TestTerminal, rows: u16, y: u16, x: u16) {
     let screen = Screen::new(terminal, 100, rows);
     assert_eq!(screen.cursor(), (y, x));

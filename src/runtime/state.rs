@@ -9,8 +9,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::{self, ThreadId};
 
 use super::app_handle::UpdateQueue;
-use super::output::{CursorPosition, WriteDestination};
+use super::output::{CursorDeclaration, WriteDestination};
 use super::{Dirty, WindowSize};
+use crate::ColorLevel;
 
 /// Committed layout in integer cells, relative to the live tree's root.
 /// Coordinates exclude scrolling offsets and terminal viewport placement.
@@ -52,6 +53,7 @@ pub struct BoxMetrics {
 #[derive(Clone, Copy)]
 pub(crate) struct NodeLayout {
     pub(crate) metrics: ElementMetrics,
+    pub(crate) paint_origin: taffy::Point<i32>,
     pub(crate) left: i32,
     pub(crate) top: i32,
 }
@@ -94,7 +96,7 @@ impl NodeRef {
         true
     }
 
-    fn layout(self) -> Option<NodeLayout> {
+    pub(super) fn layout(self) -> Option<NodeLayout> {
         let value = self.0.resolve().filter(|value| value.dirty.mounted.get())?;
         *value
             .value
@@ -186,9 +188,10 @@ pub(super) struct Store {
     pub(super) input: RefCell<super::input::InputState>,
     pub(crate) queue: Arc<UpdateQueue>,
     pub(super) window_size: Cell<WindowSize>,
+    pub(super) color_level: ColorLevel,
     pub(super) graphics: RefCell<super::graphics::GraphicsState>,
     pub(super) id: u64,
-    pub(super) cursor: Cell<Option<CursorPosition>>,
+    pub(super) cursor: Cell<Option<CursorDeclaration>>,
     pub(super) animation: RefCell<super::animation::AnimationState>,
     pub(super) destination: RefCell<Option<Rc<dyn WriteDestination>>>,
     pub(super) unmounting: Cell<bool>,
@@ -214,7 +217,7 @@ impl Drop for StateSlot {
 }
 
 impl Store {
-    pub(super) fn new() -> Rc<Self> {
+    pub(super) fn new(color_level: ColorLevel) -> Rc<Self> {
         let store = Rc::new(Self {
             panic: RefCell::new(None),
             focus: RefCell::default(),
@@ -226,6 +229,7 @@ impl Store {
                 columns: 80,
                 rows: 24,
             }),
+            color_level,
             id: NEXT_RUNTIME.fetch_add(1, Ordering::Relaxed),
             cursor: Cell::new(None),
             animation: RefCell::default(),
