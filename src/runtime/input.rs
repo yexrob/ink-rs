@@ -7,15 +7,17 @@ use super::state::Store;
 use crate::input::keypress::parse_keypress;
 use crate::input::kitty::is_query_response;
 use crate::input::parser::{InputEvent, InputParser, is_complete_control_sequence};
-use crate::{KeyEvent, KeyEventType};
+use crate::{KeyEvent, KeyEventType, MouseEvent, MouseTracking};
 
 pub(super) type InputHandler = Rc<RefCell<Box<dyn FnMut(&str, KeyEvent)>>>;
 pub(super) type PasteHandler = Rc<RefCell<Box<dyn FnMut(&str)>>>;
+pub(super) type MouseHandler = Rc<RefCell<Box<dyn FnMut(MouseEvent)>>>;
 
 #[derive(Clone)]
 pub(super) enum Handler {
     Input(InputHandler),
     Paste(PasteHandler),
+    Mouse(MouseTracking, MouseHandler),
     Focus(u64),
 }
 
@@ -24,6 +26,7 @@ impl Handler {
         match (self, other) {
             (Self::Input(a), Self::Input(b)) => Rc::ptr_eq(a, b),
             (Self::Paste(a), Self::Paste(b)) => Rc::ptr_eq(a, b),
+            (Self::Mouse(_, a), Self::Mouse(_, b)) => Rc::ptr_eq(a, b),
             (Self::Focus(a), Self::Focus(b)) => a == b,
             _ => false,
         }
@@ -35,6 +38,7 @@ pub(super) struct InputState {
     parser: InputParser,
     deadline: Option<Instant>,
     handlers: Vec<Handler>,
+    mouse_origin: Option<i32>,
 }
 
 pub(super) struct Registration {
@@ -101,6 +105,35 @@ impl Runtime {
             .count()
     }
 
+    pub(crate) fn mouse_holders(&self) -> usize {
+        self.instance
+            .store
+            .input
+            .borrow()
+            .handlers
+            .iter()
+            .filter(|handler| matches!(handler, Handler::Mouse(..)))
+            .count()
+    }
+
+    pub(crate) fn mouse_tracking(&self) -> Option<MouseTracking> {
+        self.instance
+            .store
+            .input
+            .borrow()
+            .handlers
+            .iter()
+            .filter_map(|handler| match handler {
+                Handler::Mouse(tracking, _) => Some(*tracking),
+                _ => None,
+            })
+            .max_by_key(|tracking| tracking.mode())
+    }
+
+    pub(crate) fn set_mouse_origin(&mut self, origin: Option<i32>) {
+        self.instance.store.input.borrow_mut().mouse_origin = origin;
+    }
+
     pub(crate) fn input_deadline(&self) -> Option<Instant> {
         self.instance.store.input.borrow().deadline
     }
@@ -121,6 +154,21 @@ impl Runtime {
             }
             let pasted = matches!(&event, InputEvent::Paste(_));
             let text = match event {
+                InputEvent::Mouse(mut event) => {
+                    let input = self.instance.store.input.borrow();
+                    let Some(origin) = input.mouse_origin else {
+                        continue;
+                    };
+                    event.y = event.y.saturating_sub(origin);
+                    let handlers = input.handlers.clone();
+                    drop(input);
+                    for handler in handlers {
+                        if let Handler::Mouse(_, handler) = handler {
+                            handler.borrow_mut()(event);
+                        }
+                    }
+                    continue;
+                }
                 InputEvent::Text(text) => {
                     if self.graphics_reply(&text) {
                         continue;

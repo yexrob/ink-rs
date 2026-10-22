@@ -31,6 +31,16 @@ pub struct ElementMetrics {
     pub client_height: u32,
 }
 
+impl ElementMetrics {
+    /// Whether the cell `(x, y)` lies inside this box. Ignores overflow clipping
+    /// and overlap with other boxes; right and bottom edges are excluded.
+    pub fn contains(&self, x: i32, y: i32) -> bool {
+        let x = i64::from(x) - i64::from(self.x);
+        let y = i64::from(y) - i64::from(self.y);
+        x >= 0 && y >= 0 && x < i64::from(self.width) && y < i64::from(self.height)
+    }
+}
+
 /// A View's committed layout in integer cells, relative to its parent.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BoxMetrics {

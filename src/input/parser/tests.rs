@@ -727,7 +727,6 @@ fn is_complete_control_sequence_accepts_every_complete_csi_and_ss3_form_the_pars
         "\u{1b}[A",
         "\u{1b}[I",
         "\u{1b}[24;80R",
-        "\u{1b}[<0;10;20M",
         "\u{1b}[[A",
         "\u{1b}[2$",
         "\u{1b}[ q",
@@ -863,4 +862,68 @@ fn terminal_strings_in_paste_remain_raw() {
         parse_chunks(&[&format!("\x1b[200~{payload}\x1b[201~")]),
         vec![InputEvent::Paste(payload.into())]
     );
+}
+
+#[test]
+fn sgr_mouse_button_byte_maps_actions_and_modifiers() {
+    for (button, end, kind) in [
+        (0, 'M', MouseKind::Press(MouseButton::Left)),
+        (1, 'M', MouseKind::Press(MouseButton::Middle)),
+        (2, 'M', MouseKind::Press(MouseButton::Right)),
+        (2, 'm', MouseKind::Release(MouseButton::Right)),
+        (3, 'm', MouseKind::Release(MouseButton::Left)),
+        (32, 'M', MouseKind::Drag(MouseButton::Left)),
+        (35, 'M', MouseKind::Move),
+        (64, 'M', MouseKind::WheelUp),
+        (65, 'M', MouseKind::WheelDown),
+        (66, 'M', MouseKind::WheelLeft),
+        (67, 'M', MouseKind::WheelRight),
+    ] {
+        for modifiers in [0, 4, 8, 16, 28] {
+            let sequence = format!("\x1b[<{};10;20{end}", button + modifiers);
+            assert!(is_complete_control_sequence(&sequence));
+            assert_eq!(
+                parse_chunks(&[&sequence]),
+                vec![InputEvent::Mouse(MouseEvent {
+                    kind,
+                    x: 9,
+                    y: 19,
+                    ctrl: modifiers & 16 != 0,
+                    shift: modifiers & 4 != 0,
+                    meta: modifiers & 8 != 0,
+                })]
+            );
+        }
+    }
+    // Buttons 8 to 11 reach neither use_mouse nor use_input.
+    assert_eq!(parse_chunks(&["\x1b[<128;10;20M"]), vec![]);
+}
+
+#[test]
+fn sgr_mouse_report_waits_across_reads() {
+    let mut parser = InputParser::default();
+    assert!(parser.push(b"\x1b[<0;10;").is_empty());
+    assert!(parser.has_pending_escape());
+    assert_eq!(
+        parser.push(b"20M"),
+        vec![InputEvent::Mouse(MouseEvent {
+            kind: MouseKind::Press(MouseButton::Left),
+            x: 9,
+            y: 19,
+            ctrl: false,
+            shift: false,
+            meta: false,
+        })]
+    );
+    assert!(!parser.has_pending_escape());
+}
+
+#[test]
+fn sgr_mouse_fragment_is_dropped_on_escape_flush() {
+    let mut parser = InputParser::default();
+    assert!(parser.push(b"\x1b[<0;10;").is_empty());
+    assert!(parser.has_pending_escape());
+    assert_eq!(parser.flush_pending_escape(), None);
+    assert!(!parser.has_pending_escape());
+    assert_eq!(parser.push(b"x"), vec![InputEvent::Text("x".into())]);
 }

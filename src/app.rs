@@ -10,8 +10,8 @@ use crate::runtime::{ExitResult, Runtime, UpdateQueue, WriteDestination, keep_sl
 use crate::terminal::Terminal;
 use crate::text::ansi::{Token, tokenize};
 use crate::{
-    ColorLevel, CursorPosition, Element, KittyFlags, KittyKeyboard, OutputStream, RenderOptions,
-    WindowSize,
+    ColorLevel, CursorPosition, Element, KittyFlags, KittyKeyboard, MouseTracking, OutputStream,
+    RenderOptions, WindowSize,
 };
 
 #[cfg(test)]
@@ -91,6 +91,8 @@ struct AppOutput {
     interactive: bool,
     alternate: bool,
     paste_mode: bool,
+    mouse_mode: Option<MouseTracking>,
+    live_origin: i32,
     kitty_flags: Option<KittyFlags>,
     resume_kitty_flags: Option<KittyFlags>,
     suspended: bool,
@@ -128,6 +130,9 @@ impl AppOutput {
         if self.paste_mode {
             bytes.extend_from_slice(b"\x1b[?2004l");
         }
+        if let Some(tracking) = self.mouse_mode {
+            bytes.extend_from_slice(format!("\x1b[?{}l\x1b[?1006l", tracking.mode()).as_bytes());
+        }
         if self.kitty_flags.is_some() {
             bytes.extend_from_slice(b"\x1b[<u");
         }
@@ -162,6 +167,27 @@ impl AppOutput {
             };
             self.terminal.write(bytes, &self.restore_bytes());
         }
+    }
+
+    fn set_mouse_mode(&mut self, tracking: Option<MouseTracking>) {
+        let tracking = tracking.filter(|_| self.alternate && self.tty);
+        if self.mouse_mode == tracking {
+            return;
+        }
+        let mut bytes = Vec::new();
+        if let Some(previous) = self.mouse_mode {
+            bytes.extend_from_slice(format!("\x1b[?{}l", previous.mode()).as_bytes());
+        }
+        if let Some(tracking) = tracking {
+            if self.mouse_mode.is_none() {
+                bytes.extend_from_slice(b"\x1b[?1006h");
+            }
+            bytes.extend_from_slice(format!("\x1b[?{}h", tracking.mode()).as_bytes());
+        } else {
+            bytes.extend_from_slice(b"\x1b[?1006l");
+        }
+        self.mouse_mode = tracking;
+        self.terminal.write(&bytes, &self.restore_bytes());
     }
 
     fn enable_kitty(&mut self, flags: KittyFlags) {
@@ -208,6 +234,8 @@ impl AppOutput {
                 self.static_rows.append(&mut frame.static_lines);
                 let start = self.static_rows.len().saturating_sub(self.rows);
                 let mut live = self.static_rows[start..].to_vec();
+                let cut = (live.len() + frame.live.len()).saturating_sub(self.rows);
+                self.live_origin = live.len() as i32 - cut as i32;
                 // useCursor starts below Static; Output clips the combined rows.
                 if let Some((_, y)) = &mut cursor {
                     *y = y.saturating_add(live.len());
@@ -340,6 +368,7 @@ impl AppOutput {
         final_output.splice(..0, self.restore_modes());
         self.terminal.restore(&final_output);
         self.paste_mode = false;
+        self.mouse_mode = None;
         self.kitty_flags = None;
     }
 }
@@ -428,6 +457,7 @@ impl App {
         }
         output.terminal.write(&bytes, &[]);
         output.paste_mode = false;
+        output.mouse_mode = None;
         output.resume_kitty_flags = output.kitty_flags.take();
         output.suspended = true;
         if self.raw_mode {
@@ -544,6 +574,8 @@ impl App {
             interactive,
             alternate,
             paste_mode: false,
+            mouse_mode: None,
+            live_origin: 0,
             kitty_flags: None,
             resume_kitty_flags: None,
             suspended: false,
@@ -673,9 +705,9 @@ impl App {
         Self::report_panic(runtime);
         let stdin_tty = self.destination.borrow().terminal.stdin_is_tty();
         let holders = runtime.input_holders();
-        // Ink use-focus.ts skips setRawMode on unsupported stdin, unlike
+        // Mouse follows Ink use-focus.ts, skipping raw mode on unsupported stdin, unlike
         // use_input and use_paste, which retain their Unsupported error.
-        if !stdin_tty && holders > runtime.focus_holders() {
+        if !stdin_tty && holders > runtime.focus_holders() + runtime.mouse_holders() {
             self.queue.request_exit(Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 "raw mode is not supported on stdin",
@@ -691,6 +723,9 @@ impl App {
             if !paste_mode {
                 self.destination.borrow_mut().set_paste_mode(false);
             }
+            if !raw_mode {
+                self.destination.borrow_mut().set_mouse_mode(None);
+            }
             if raw_mode != self.raw_mode {
                 let mut destination = self.destination.borrow_mut();
                 // Ink defers disable to a microtask; the end of a step gives
@@ -704,6 +739,9 @@ impl App {
             self.destination
                 .borrow_mut()
                 .set_paste_mode(self.raw_mode && paste_mode);
+            self.destination
+                .borrow_mut()
+                .set_mouse_mode(runtime.mouse_tracking().filter(|_| self.raw_mode));
             if runtime.start_graphics(now) {
                 let mut destination = self.destination.borrow_mut();
                 let restore = destination.restore_bytes();
@@ -752,6 +790,9 @@ impl App {
         if self.raw_mode
             && let Some(runtime) = &mut self.runtime
         {
+            let output = self.destination.borrow();
+            runtime.set_mouse_origin(output.mouse_mode.map(|_| output.live_origin));
+            drop(output);
             runtime.expire_graphics(now);
             if runtime.input(bytes, now)
                 && let Some((flags, _)) = self.kitty_query.take()

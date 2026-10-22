@@ -76,7 +76,7 @@ pub use error::{Error, PanicError, PanicLocation};
 #[cfg(feature = "macros")]
 pub use ink_rs_macros::{Props, rsx};
 pub use input::kitty::{KittyFlags, KittyKeyboard};
-pub use input::{KeyEvent, KeyEventType};
+pub use input::{KeyEvent, KeyEventType, MouseButton, MouseEvent, MouseKind, MouseTracking};
 pub use render::{RenderOptions, render_to_string};
 pub use runtime::{
     AlreadySuspended, Animation, AnimationOptions, AppHandle, BoxMetrics, CursorPosition,

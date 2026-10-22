@@ -7,6 +7,77 @@ pub(crate) mod parser;
 
 use keypress::{ParsedKey, is_non_alphanumeric_key};
 
+/// A mouse button reported by the terminal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MouseButton {
+    /// Left button.
+    Left,
+    /// Middle button.
+    Middle,
+    /// Right button.
+    Right,
+}
+
+/// The action in an SGR mouse report.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MouseKind {
+    /// A button was pressed.
+    Press(MouseButton),
+    /// A button was released. Reports with no button identity use Left.
+    Release(MouseButton),
+    /// Pointer motion while a button is held.
+    Drag(MouseButton),
+    /// Pointer motion with no button held; needs [`MouseTracking::Motion`].
+    Move,
+    /// The wheel moved up.
+    WheelUp,
+    /// The wheel moved down.
+    WheelDown,
+    /// The wheel moved left.
+    WheelLeft,
+    /// The wheel moved right.
+    WheelRight,
+}
+
+/// Mouse action, cell coordinates and modifiers delivered to `use_mouse`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MouseEvent {
+    /// The reported action.
+    pub kind: MouseKind,
+    /// Zero-based cells from the live frame's left edge, as in `ElementMetrics`.
+    pub x: i32,
+    /// Zero-based cells from the live frame's top, the origin of `ElementMetrics`.
+    /// Negative over Static rows replayed above the live frame.
+    pub y: i32,
+    /// Set when the Control modifier is present.
+    pub ctrl: bool,
+    /// Set when Shift is present.
+    pub shift: bool,
+    /// Set for Meta or Alt/Option.
+    pub meta: bool,
+}
+
+/// How much the terminal reports. Each level includes the ones before it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MouseTracking {
+    /// Press, release and the wheel (mode 1000).
+    Click,
+    /// Adds motion while a button is held (mode 1002).
+    Drag,
+    /// Adds motion with no button held, for hover (mode 1003).
+    Motion,
+}
+
+impl MouseTracking {
+    pub(crate) fn mode(self) -> u16 {
+        match self {
+            Self::Click => 1000,
+            Self::Drag => 1002,
+            Self::Motion => 1003,
+        }
+    }
+}
+
 /// The event kind reported by the kitty keyboard protocol.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KeyEventType {

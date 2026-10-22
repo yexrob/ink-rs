@@ -6,11 +6,11 @@ use std::time::Duration;
 use super::animation::{Animation, AnimationOptions, Subscription, Values};
 use super::context::{Contexts, Provider};
 use super::focus::{FocusManager, FocusOptions, FocusRegistration};
-use super::input::{Handler, InputHandler, PasteHandler, Registration};
+use super::input::{Handler, InputHandler, MouseHandler, PasteHandler, Registration};
 use super::output::{CursorCleanup, CursorDeclaration, CursorPosition, OutputStream, OutputWriter};
 use super::state::{BoxMetrics, BoxReader, NodeRef, State, StateSlot, Store};
 use super::{AppHandle, Dirty, WindowSize};
-use crate::{Callback, ColorLevel, KeyEvent};
+use crate::{Callback, ColorLevel, KeyEvent, MouseEvent, MouseTracking};
 
 type Setup = Box<dyn FnOnce() -> Box<dyn Any>>;
 
@@ -153,6 +153,50 @@ impl Scope<'_> {
         let store = self.store.clone();
         self.use_effect(active, move || {
             active.then(|| Registration::new(store, Handler::Paste(current)))
+        });
+    }
+
+    /// Receives mouse events while `tracking` is `Some`. Reporting is off until
+    /// a hook asks for it; active hooks use the highest requested level and hold
+    /// raw mode through a passive effect. Non-TTY stdin does nothing, with no error.
+    /// Calls use the handler from the latest render, in registration order.
+    /// Mouse events skip Ctrl+C, Ctrl+Z and focus handling, and never reach
+    /// [`Self::use_input`]. No node routing or focus change happens on click.
+    ///
+    /// Reporting requires an alternate screen and TTY stdout. Inline mode
+    /// receives nothing: Static output, scrolling, external writes and resize
+    /// move the live frame's screen row, and ink-rs cannot know its position.
+    /// Coordinates use the last painted live frame's origin. Hit testing ignores
+    /// overflow clipping and overlap:
+    /// ```no_run
+    /// # use ink_rs::{Scope, MouseTracking, measure_element};
+    /// # fn example(cx: &mut Scope) {
+    /// let node = cx.use_node_ref(); // Attach this ref to a View.
+    /// cx.use_mouse(Some(MouseTracking::Click), move |event| {
+    ///     if measure_element(node).contains(event.x, event.y) {
+    ///         // Handle the event inside the box.
+    ///     }
+    /// });
+    /// # }
+    /// ```
+    /// Reporting takes away terminal text selection; most terminals bypass it
+    /// with Shift+drag, iTerm2 with Option+drag. ink-rs asks for SGR only, not
+    /// X10 or 1015 encoding. Windows Terminal is supported; older conhost is
+    /// unverified. Releases without button identity map to [`crate::MouseButton::Left`].
+    pub fn use_mouse(
+        &mut self,
+        tracking: Option<MouseTracking>,
+        handler: impl FnMut(MouseEvent) + 'static,
+    ) {
+        let mut handler = Some(Box::new(handler) as Box<dyn FnMut(MouseEvent)>);
+        let current: MouseHandler =
+            self.use_memo((), || Rc::new(RefCell::new(handler.take().unwrap())));
+        if let Some(handler) = handler {
+            *current.borrow_mut() = handler;
+        }
+        let store = self.store.clone();
+        self.use_effect(tracking, move || {
+            tracking.map(|tracking| Registration::new(store, Handler::Mouse(tracking, current)))
         });
     }
 
