@@ -110,3 +110,4 @@
 | [066](066-static-from-fn.md) | 2026-10-22 | `Static::from_fn`：按下标渲染应用自己存的条目 | 已实施 |
 | [067](067-release-0-1-5.md) | 2026-10-22 | 发布 0.1.5 | 已实施 |
 | [068](068-render-perf.md) | 2026-10-22 | 渲染性能：squash 缓存与 reconcile 去复制 | 已实施 |
+| [069](069-terminal-graphics.md) | 2026-10-22 | 终端图形原语：回复解析、`use_graphics` 探测与 `write_passthrough` | 实施中 |
