@@ -287,10 +287,12 @@ pub(in crate::driver) fn install_events(
 ) -> &'static io::Result<()> {
     static EVENTS: OnceLock<io::Result<()>> = OnceLock::new();
     EVENTS.get_or_init(|| {
-        let _ = DEFAULT_SIGNALS.set(default_signals);
-        // SAFETY: the handler has the required ABI and remains valid for the process lifetime.
-        if unsafe { SetConsoleCtrlHandler(Some(control_handler), 1) } == 0 {
-            return Err(io::Error::last_os_error());
+        if process::fix_termination() == crate::Termination::Handled {
+            let _ = DEFAULT_SIGNALS.set(default_signals);
+            // SAFETY: the handler has the required ABI and remains valid for the process lifetime.
+            if unsafe { SetConsoleCtrlHandler(Some(control_handler), 1) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
         }
         // SetWinEventHook needs user32, a message loop, and undocumented ntdll
         // NtQueryInformationProcess to find conhost. Poll without those dependencies.

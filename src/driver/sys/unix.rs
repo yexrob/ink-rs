@@ -174,12 +174,17 @@ pub(in crate::driver) fn install_events(
 ) -> &'static io::Result<()> {
     static SIGNALS: OnceLock<io::Result<()>> = OnceLock::new();
     SIGNALS.get_or_init(|| {
-        // signal-hook retains its OS handler after unregister. Leave conditional
-        // defaults installed, gated by live apps (Ink signal-exit unsubscribes).
-        for signal in [SIGINT, SIGTERM, SIGHUP] {
-            signal_hook::flag::register_conditional_default(signal, default_signals.clone())?;
+        let termination = process::fix_termination();
+        let mut handled = vec![SIGWINCH, SIGTSTP, SIGCONT];
+        if termination == crate::Termination::Handled {
+            // signal-hook retains its OS handler after unregister. Leave conditional
+            // defaults installed, gated by live apps (Ink signal-exit unsubscribes).
+            for signal in [SIGINT, SIGTERM, SIGHUP] {
+                signal_hook::flag::register_conditional_default(signal, default_signals.clone())?;
+                handled.push(signal);
+            }
         }
-        let mut signals = Signals::new([SIGINT, SIGTERM, SIGHUP, SIGWINCH, SIGTSTP, SIGCONT])?;
+        let mut signals = Signals::new(handled)?;
         thread::Builder::new()
             .name("ink-signals".into())
             .spawn(move || {

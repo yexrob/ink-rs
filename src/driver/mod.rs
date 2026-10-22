@@ -9,6 +9,7 @@ use crate::runtime::{UpdateQueue, Wake};
 use crate::terminal::Terminal;
 use crate::{AppHandle, Element, Error, Options};
 use process::{ProcessTerminal, Registration};
+pub use process::{Termination, TerminationLocked, set_termination};
 
 mod environment;
 mod process;
@@ -147,7 +148,8 @@ impl Instance {
     ///
     /// To end a blocked wait from another thread, take an [`Instance::handle`]
     /// before waiting and call [`AppHandle::exit`] on it.
-    /// Termination signals restore the terminal and retain their default effect.
+    /// With [`Termination::Handled`], termination signals restore the terminal
+    /// and retain their default effect.
     pub fn wait_until_exit(mut self) -> Result<Option<Box<dyn Any + Send>>, Error> {
         self.mounted.registration.as_mut().unwrap().enter_loop();
         let result = run_loop(

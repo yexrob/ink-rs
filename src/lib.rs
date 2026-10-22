@@ -70,7 +70,7 @@ pub use color::{Color, ColorLevel, ParseColorError};
 pub use components::{Newline, Spacer, Static, Text, Transform, View};
 #[cfg(feature = "tokio")]
 pub use driver::tokio;
-pub use driver::{Instance, render};
+pub use driver::{Instance, Termination, TerminationLocked, render, set_termination};
 pub use element::{Element, Key, TextChild};
 pub use error::{Error, PanicError, PanicLocation};
 #[cfg(feature = "macros")]

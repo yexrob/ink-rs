@@ -83,8 +83,9 @@ impl Instance {
     ///
     /// Results match [`crate::Instance::wait_until_exit`]: exit values are
     /// returned, I/O and app errors propagate, and component panics display
-    /// an overview before returning [`Error::Panic`]. Termination signals
-    /// retain their default effect after all app cleanups finish.
+    /// an overview before returning [`Error::Panic`]. With
+    /// [`crate::Termination::Handled`], termination signals retain their default
+    /// effect after all app cleanups finish.
     pub async fn wait_until_exit(mut self) -> Result<Option<Box<dyn Any + Send>>, Error> {
         let registration = self.mounted.registration.as_mut().unwrap();
         // Tokio loops on one thread are concurrent, not nested blocking waits.

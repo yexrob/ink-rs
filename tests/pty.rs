@@ -55,6 +55,8 @@ enum Case {
     JobControl,
     #[cfg(unix)]
     Orphan,
+    #[cfg(unix)]
+    ApplicationTermination,
     FullHeightRerender,
     #[cfg(feature = "tokio")]
     TokioFinish,
@@ -91,6 +93,12 @@ const CASES: &[(Case, &str, &str)] = &[
         Case::Orphan,
         "orphan",
         "Ctrl+Z ignores a session-leader process group",
+    ),
+    #[cfg(unix)]
+    (
+        Case::ApplicationTermination,
+        "application-termination",
+        "application owns SIGTERM and unmount restores the terminal",
     ),
     (
         Case::Normal,
@@ -431,7 +439,71 @@ fn nested_panic(cx: &mut Scope, fail: &bool) -> Element {
     Text::new("raw mode active").into()
 }
 
+#[cfg(unix)]
+fn application_termination() -> Result {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use ink_rs::{KittyKeyboard, Termination, set_termination};
+    use signal_hook::consts::SIGTERM;
+
+    fn frame(cx: &mut Scope, received: &bool) -> Element {
+        cx.use_input(true, |_, _| {});
+        cx.use_paste(true, |_| {});
+        Text::new(if *received {
+            "application received SIGTERM"
+        } else {
+            "waiting for termination"
+        })
+        .into()
+    }
+
+    set_termination(Termination::Handled)?;
+    let terminal = ink_rs::testing::TestTerminal::new(100, 24);
+    ink_rs::testing::mount(Text::new("test mount"), Options::default(), &terminal).unmount();
+    ink_rs::testing::render(Text::new("test render")).unmount();
+    set_termination(Termination::Application)?;
+    let received = Arc::new(AtomicBool::new(false));
+    let handler = signal_hook::flag::register(SIGTERM, received.clone())?;
+    let before = stdin_mode()?;
+    let mut app = render(
+        component(frame, false),
+        Options {
+            interactive: Some(true),
+            alternate_screen: true,
+            kitty_keyboard: KittyKeyboard::Enabled(Default::default()),
+            max_fps: 0,
+            ..Options::default()
+        },
+    );
+    assert!(!same_input_mode(&before, &stdin_mode()?));
+    signal_hook::low_level::raise(SIGTERM)?;
+    assert!(received.load(Ordering::SeqCst));
+    app.rerender(component(frame, true));
+    assert_eq!(
+        set_termination(Termination::Handled),
+        Err(ink_rs::TerminationLocked)
+    );
+    set_termination(Termination::Application)?;
+    app.unmount();
+    assert!(same_input_mode(&before, &stdin_mode()?));
+    println!("input-mode-restored");
+
+    // A host handler installed after the mount must work without a live app.
+    signal_hook::low_level::unregister(handler);
+    received.store(false, Ordering::SeqCst);
+    signal_hook::flag::register(SIGTERM, received.clone())?;
+    signal_hook::low_level::raise(SIGTERM)?;
+    assert!(received.load(Ordering::SeqCst));
+    println!("exited");
+    Ok(())
+}
+
 fn fixture(case: Case) -> Result {
+    #[cfg(unix)]
+    if case == Case::ApplicationTermination {
+        return application_termination();
+    }
     #[cfg(feature = "tokio")]
     if matches!(case, Case::TokioFinish | Case::TokioSuspend) {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -543,6 +615,25 @@ fn assert_output(case: Case, output: &[u8], printed: &str) -> Result {
     let mut parser = vt100::Parser::new(24, 100, 1000);
     parser.process(output);
     let output = String::from_utf8_lossy(output);
+    #[cfg(unix)]
+    if case == Case::ApplicationTermination {
+        let Some((frame, _)) = output.split_once("\x1b[?1049l") else {
+            return Err(format!("missing alternate screen restoration: {output:?}").into());
+        };
+        let mut screen = vt100::Parser::new(24, 100, 0);
+        screen.process(frame.as_bytes());
+        if !screen
+            .screen()
+            .contents()
+            .contains("application received SIGTERM")
+            || !output.contains("\x1b[?2004h")
+            || !output.contains("\x1b[>1u")
+            || !output.contains("\x1b[?2004l\x1b[<u\x1b[?1049l\x1b[?25h")
+            || !printed.contains("input-mode-restored")
+        {
+            return Err(format!("missing signal frame or terminal restoration: {output:?}").into());
+        }
+    }
     let handover = case == Case::Suspend;
     #[cfg(feature = "tokio")]
     let handover = handover || case == Case::TokioSuspend;

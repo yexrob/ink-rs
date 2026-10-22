@@ -10,6 +10,59 @@ use std::thread::{self, ThreadId};
 use super::{Message, Post, stdin, sys};
 use crate::terminal::Terminal;
 
+/// Who handles SIGINT, SIGTERM and SIGHUP on Unix and console termination
+/// events on Windows: Ctrl+C, Ctrl+Break, close, logoff and shutdown.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Termination {
+    /// ink-rs restores the terminal and ends the process.
+    #[default]
+    Handled,
+    /// ink-rs installs no handlers for termination signals or console events.
+    /// The application handles them and ends its apps with
+    /// [`crate::Instance::unmount`] or [`crate::AppHandle::exit`].
+    Application,
+}
+
+/// The process handlers have fixed a different termination setting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TerminationLocked;
+
+impl std::fmt::Display for TerminationLocked {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the process termination setting is fixed")
+    }
+}
+
+impl std::error::Error for TerminationLocked {}
+
+/// Sets termination handling for every app in this process.
+///
+/// The default is [`Termination::Handled`]. The first driver render fixes the
+/// setting when it installs process handlers. Before that, calls replace the
+/// setting. After that, the same value returns `Ok(())`; a different value
+/// returns [`TerminationLocked`] and leaves the setting unchanged.
+/// Call this function at the start of `main`, before any library renders an app.
+///
+/// [`crate::testing::mount`] and [`crate::testing::render`] install no process
+/// handlers and neither use nor fix this setting. Panic restoration, resize,
+/// Unix suspend/resume and [`crate::Options::exit_on_ctrl_c`] are unchanged.
+pub fn set_termination(termination: Termination) -> Result<(), TerminationLocked> {
+    let mut setting = registry().termination_setting.lock().unwrap();
+    let (current, fixed) = &mut *setting;
+    if *fixed && *current != termination {
+        return Err(TerminationLocked);
+    }
+    *current = termination;
+    Ok(())
+}
+
+pub(super) fn fix_termination() -> Termination {
+    let mut setting = registry().termination_setting.lock().unwrap();
+    let (current, fixed) = &mut *setting;
+    *fixed = true;
+    *current
+}
+
 // Release the registry lock before restoration. Lock order is RestoreState ->
 // stdin lifecycle -> input route -> failure; normal output takes RestoreState
 // -> failure, and normal mode switches take lifecycle -> route -> failure.
@@ -249,6 +302,7 @@ impl Entry {
 struct Registry {
     entries: Mutex<Vec<Arc<Entry>>>,
     default_signals: Arc<AtomicBool>,
+    termination_setting: Mutex<(Termination, bool)>,
     termination: Mutex<Option<sys::Termination>>,
 }
 
@@ -257,6 +311,7 @@ fn registry() -> &'static Registry {
     REGISTRY.get_or_init(|| Registry {
         entries: Mutex::new(Vec::new()),
         default_signals: Arc::new(AtomicBool::new(true)),
+        termination_setting: Mutex::new((Termination::default(), false)),
         termination: Mutex::new(None),
     })
 }
