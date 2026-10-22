@@ -112,3 +112,4 @@
 | [068](068-render-perf.md) | 2026-10-22 | 渲染性能：squash 缓存与 reconcile 去复制 | 已实施 |
 | [069](069-terminal-graphics.md) | 2026-10-22 | 终端图形原语：回复解析、`use_graphics` 探测与 `write_passthrough` | 已实施 |
 | [070](070-release-0-1-6.md) | 2026-10-22 | 发布 0.1.6 | 已实施 |
+| [071](071-bingo-research.md) | 2026-10-22 | 调研 bingo 需要的 ink-rs 改动：终止信号、`TestApp` 读屏、鼠标 | 实施中 |
