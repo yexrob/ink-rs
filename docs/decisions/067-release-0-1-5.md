@@ -17,6 +17,8 @@ eink-rs 正式实施 Markdown 流式渲染（eink-rs 的记录 018），Codex �
   - 升补丁版本：新增一个构造函数，已有的 API 不变。0.x 下 Cargo 把 0.1.5 看作和 0.1.4 兼容，下游 `cargo update` 后拿到。
   - 顺序同 064：本地全量、`cargo publish --dry-run`、用户验收、推送 main、等 CI、打 `v0.1.5` 标签、`cargo publish -p ink-rs`。验收和 eink-rs 的 Markdown 正式实施一起交给用户：0.1.5 为它而发。
 
+- 用户定（「性能做进 0.1.5」）：0.1.5 包含 [068](068-render-perf.md) 的性能工作。原先的升版本提交 a777065 没推送，撤掉，068 合入后升版本号。
+
 ## 备选与取舍
 
 - **升到 0.2.0**：0.x 下新增 API 不要求升次版本；升了的话，下游要改依赖要求才拿得到。
@@ -26,7 +28,7 @@ eink-rs 正式实施 Markdown 流式渲染（eink-rs 的记录 018），Codex �
 
 主 agent 自己执行：
 
-1. 升版本号和 `Cargo.lock`，单独提交。
+1. 068 合入后，升版本号和 `Cargo.lock`，单独提交。
 2. fmt、两套 feature 的 clippy、全量测试、`cargo publish --dry-run -p ink-rs`。
 3. 交给用户验收，连同 eink-rs 的 Markdown 正式实施和压测结果。用户通过前不推送。
 4. 推送 main，等 CI。

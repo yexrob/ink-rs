@@ -109,3 +109,4 @@
 | [065](065-frame-rate-example.md) | 2026-10-22 | 帧率示例 `frame-rate` | 已实施 |
 | [066](066-static-from-fn.md) | 2026-10-22 | `Static::from_fn`：按下标渲染应用自己存的条目 | 已实施 |
 | [067](067-release-0-1-5.md) | 2026-10-22 | 发布 0.1.5 | 实施中 |
+| [068](068-render-perf.md) | 2026-10-22 | 渲染性能：squash 缓存与 reconcile 去复制 | 实施中 |
