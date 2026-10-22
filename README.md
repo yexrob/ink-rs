@@ -74,6 +74,12 @@ Ink's screen reader mode is not ported yet.
 cargo run --example use-input
 ```
 
+`frame-rate` is ink-rs's own: it shows the frame rate that `max_fps` holds.
+
+```sh
+cargo run --release --example frame-rate -- 60
+```
+
 ## Platform support
 
 Linux, macOS and Windows 10 1809 (build 17763) or later. The minimum supported Rust

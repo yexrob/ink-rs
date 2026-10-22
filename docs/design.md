@@ -231,6 +231,7 @@ Ink 的测试是规格，分四层：
 ### 示例
 
 - `examples/` 移植 Ink 的示例，目录名同 Ink（kebab-case），`cargo run --example use-input` 对应 Ink 的 `npm run example examples/use-input`。文件开头注明移植的 Ink 示例。
+- `frame-rate` 是 ink-rs 自有的示例，不是移植，显示 `max_fps` 下实测的帧率和帧间隔（见[记录 065](decisions/065-frame-rate-example.md)）。文件开头注明。
 - 有测试的示例用 Cargo 的多文件布局：`main.rs` 放 `main`，`app.rs` 放组件、reducer 和文本逻辑，只用公开 API。`tests/examples.rs` 以 `#[path]` 引入 `app.rs`，在进程内挂载，不开 PTY；需要真实终端的示例（resize、终端交接、进程自然结束）在 `tests/examples_pty.rs` 中运行。没有测试的示例是单个文件，同 `counter.rs`。
 - 示例用 `rsx!` 建树，`Cargo.toml` 为每个示例和两个示例测试声明 `required-features = ["macros"]`。
 - 依赖 tokio 的示例（jest、subprocess-output）另声明 `tokio` feature，`main` 为 `#[tokio::main(flavor = "local")]`，异步工作放在 `use_future` 中。外部数据经 channel 交给组件：subprocess-output 的 `app` 接收 `UnboundedReceiver<Chunk>`，`main` 从子进程读取，测试直接送入数据块。

@@ -77,6 +77,10 @@ name = "cursor-ime"
 required-features = ["macros"]
 
 [[example]]
+name = "frame-rate"
+required-features = ["macros"]
+
+[[example]]
 name = "incremental-rendering"
 required-features = ["macros"]
 
