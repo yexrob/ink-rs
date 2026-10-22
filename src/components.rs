@@ -217,14 +217,21 @@ impl Static {
         render: impl Fn(&T, usize) -> Element + 'static,
     ) -> Static {
         let items = items.into();
+        Static::from_fn(items.len(), move |i| render(&items[i], i))
+    }
+
+    /// `len` items rendered by index, for items the app keeps in storage of
+    /// its own, such as an `Rc<RefCell<Vec<T>>>`: a growing history needs no
+    /// copy per render. Only items past those already written are rendered.
+    pub fn from_fn(len: usize, render: impl Fn(usize) -> Element + 'static) -> Static {
         Static {
             style: Style {
                 position: Position::Absolute,
                 flex_direction: crate::FlexDirection::Column,
                 ..Style::default()
             },
-            len: items.len(),
-            render: Rc::new(move |i| render(&items[i], i)),
+            len,
+            render: Rc::new(render),
         }
     }
 }
