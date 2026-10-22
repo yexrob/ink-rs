@@ -112,4 +112,8 @@
 | [068](068-render-perf.md) | 2026-10-22 | 渲染性能：squash 缓存与 reconcile 去复制 | 已实施 |
 | [069](069-terminal-graphics.md) | 2026-10-22 | 终端图形原语：回复解析、`use_graphics` 探测与 `write_passthrough` | 已实施 |
 | [070](070-release-0-1-6.md) | 2026-10-22 | 发布 0.1.6 | 已实施 |
-| [071](071-bingo-research.md) | 2026-10-22 | 调研 bingo 需要的 ink-rs 改动：终止信号、`TestApp` 读屏、鼠标 | 实施中 |
+| [071](071-bingo-research.md) | 2026-10-22 | 调研 bingo 需要的 ink-rs 改动：终止信号、`TestApp` 读屏、鼠标 | 已实施 |
+| [072](072-termination.md) | 2026-10-22 | 终止信号交给应用：进程级的 `set_termination` | 实施中 |
+| [073](073-test-frame.md) | 2026-10-22 | `TestApp` 读屏：`live_frame` 和 `static_output` | 实施中 |
+| [074](074-color-level-node-cursor.md) | 2026-10-22 | `use_color_level` 和锚定节点的光标 | 实施中 |
+| [075](075-mouse.md) | 2026-10-22 | 鼠标：SGR 1006 解析、`use_mouse` 和命中测试 | 实施中 |

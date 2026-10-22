@@ -1,7 +1,7 @@
 # 调研 bingo 需要的 ink-rs 改动
 
 - 日期：2026-10-22
-- 状态：实施中
+- 状态：已实施
 - 提交：无
 - Brief：[bingo-research](briefs/bingo-research.md)；需求：[bingo-signal-ownership](briefs/bingo-signal-ownership.md)、[bingo-test-frame](briefs/bingo-test-frame.md)、[bingo-mouse](briefs/bingo-mouse.md)
 
@@ -47,3 +47,13 @@ bingo 是建在 ink-rs 和 eink-rs 上的编码 agent。它的会话 bingo-refac
 - **mouse**：SGR 1006 的解析；模式的开关和恢复；Windows；内联模式下帧在屏幕上的行能否知道，命中测试的 API；和焦点的关系；终端的文字选择。
 
 调研交回后，主 agent 把这三项的方案和 eink-rs 的四项合在一轮交给用户；谈定后各开实施记录。
+
+## 结果
+
+两份报告交回，在 `<scratchpad>/research/bingo/`。主 agent 把三项的方案和 eink-rs 的四项合在一轮交给用户，用户的选择：
+
+- 原语：「加两个 (Recommended)」，`Scope::use_color_level()` 和锚定节点的光标进 0.1.7，见 [074](074-color-level-node-cursor.md)。
+- 鼠标：「备用屏 + 悬停档 (Recommended)」，见 [075](075-mouse.md)。
+- eink-rs 的版本：「不拆 tokio，发 0.2.2 (Recommended)」，见 eink-rs 的记录 024。
+
+实施记录：[072](072-termination.md) 终止信号、[073](073-test-frame.md) 读屏、[074](074-color-level-node-cursor.md) 两个原语、[075](075-mouse.md) 鼠标。
