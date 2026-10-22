@@ -1,6 +1,6 @@
 [package]
 name = "ink-rs"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 rust-version = "1.88"
 description = "Build terminal user interfaces with components, in the spirit of Ink"
