@@ -213,9 +213,9 @@ impl Instance {
         }
     }
 
-    fn new(element: Element, store: &Rc<Store>, parent: Weak<Dirty>, contexts: Contexts) -> Self {
+    fn new(store: &Rc<Store>, parent: Weak<Dirty>, contexts: Contexts) -> Self {
         Self {
-            element,
+            element: Element::empty(),
             children: Vec::new(),
             host: None,
             node_ref: None,
@@ -395,6 +395,7 @@ pub(crate) struct Runtime {
     stop_requested: bool,
     pub(crate) catch: bool,
     overview: bool,
+    overview_element: Option<Element>,
 }
 
 impl Runtime {
@@ -423,12 +424,7 @@ impl Runtime {
             refs: BTreeMap::new(),
             tree,
             root,
-            instance: Instance::new(
-                Element::fragment(Vec::<Element>::new()),
-                &store,
-                Weak::new(),
-                Contexts::default(),
-            ),
+            instance: Instance::new(&store, Weak::new(), Contexts::default()),
             cleanups: Cleanups::default(),
             next: Some(Element::fragment([element])),
             options,
@@ -440,6 +436,7 @@ impl Runtime {
             stop_requested: false,
             catch: false,
             overview: false,
+            overview_element: None,
         }
     }
 
@@ -459,6 +456,10 @@ impl Runtime {
 
     pub(crate) fn rerender(&mut self, element: Element) {
         self.next = Some(Element::fragment([element]));
+        if self.overview {
+            // Cleanup failures replay the overview after reconciliation consumes its children.
+            self.overview_element = self.next.clone();
+        }
     }
 
     pub(crate) fn set_destination(&mut self, destination: Rc<dyn WriteDestination>) {
@@ -530,7 +531,7 @@ impl Runtime {
         // Ink ErrorBoundary replaces the user tree; never render a subtree
         // whose reconciliation or effect group unwound.
         self.next = Some(if self.overview {
-            self.instance.element.clone()
+            self.overview_element.clone().expect("overview element")
         } else {
             Element::fragment(Vec::<Element>::new())
         });
@@ -760,7 +761,6 @@ fn reconcile_children(
             }
             let child = child.unwrap_or_else(|| {
                 Instance::new(
-                    element.clone(),
                     &instance.store,
                     Rc::downgrade(&instance.dirty),
                     instance.child_contexts.clone(),
@@ -825,15 +825,14 @@ fn reconcile(
     instance.dirty.descendants.set(false);
     let mut changed = !instance.rendered || supplied || context_changed;
     instance.background = background;
-    let node = instance.element.0.clone();
-    let child_background = match &node {
+    let child_background = match &instance.element.0 {
         Node::View(view) => view.style.background_color.or(background),
         Node::Static(value) => value.style.background_color.or(background),
         Node::Text(text) => text.style.background_color.or(background),
         _ => background,
     };
-    let text = matches!(node, Node::Text(_) | Node::Transform(_));
-    let next_children = match &node {
+    let text = matches!(instance.element.0, Node::Text(_) | Node::Transform(_));
+    let next_children = match &mut instance.element.0 {
         Node::Component(component) => {
             let dirty = instance.dirty.own.replace(false);
             if render || dirty {
@@ -871,7 +870,7 @@ fn reconcile(
         Node::View(_) | Node::Static(_) if inside_text => {
             panic!("<Box> can\u{2019}t be nested inside <Text> component")
         }
-        Node::View(view) if render => Some(view.children.clone()),
+        Node::View(view) if render => Some(std::mem::take(&mut view.children)),
         Node::Static(value) if render => {
             // Static.tsx sets index to items.length on shrink as well as append.
             instance.written = instance.written.min(value.len);
@@ -881,9 +880,9 @@ fn reconcile(
                     .collect(),
             )
         }
-        Node::Text(text) if render => Some(text.children.clone()),
-        Node::Transform(transform) if render => Some(transform.children.clone()),
-        Node::Fragment(children) if render => Some(children.clone()),
+        Node::Text(text) if render => Some(std::mem::take(&mut text.children)),
+        Node::Transform(transform) if render => Some(std::mem::take(&mut transform.children)),
+        Node::Fragment(children) if render => Some(std::mem::take(children)),
         Node::Str(_) if !inside_text => {
             unreachable!("strings must be children of Text or Transform")
         }
@@ -898,12 +897,14 @@ fn reconcile(
         level,
         cleanups,
     );
-    match &node {
+    match &instance.element.0 {
         Node::View(view) => {
-            update_view(instance, view.style.clone(), false, tree);
-            if instance.node_ref != view.node_ref {
-                instance.node_ref = view.node_ref;
-                cleanups.refs.push((instance.host.unwrap(), view.node_ref));
+            let style = view.style.clone();
+            let node_ref = view.node_ref;
+            update_view(instance, style, false, tree);
+            if instance.node_ref != node_ref {
+                instance.node_ref = node_ref;
+                cleanups.refs.push((instance.host.unwrap(), node_ref));
             }
             order_children(tree, instance.host.unwrap(), &instance.children);
         }
@@ -923,11 +924,11 @@ fn reconcile(
             } else {
                 let text = TextNode {
                     children: inline_children(instance, child_background, level),
-                    wrap: match &node {
+                    wrap: match &instance.element.0 {
                         Node::Text(text) => text.wrap,
                         _ => TextWrap::Wrap,
                     },
-                    transform: transform(&node, background, level),
+                    transform: transform(&instance.element.0, background, level),
                 };
                 if let Some(host) = instance.host {
                     if tree.props(host).text.as_ref() != Some(&text) {
@@ -954,7 +955,7 @@ fn reconcile(
         .dirty
         .descendants
         .set(instance.children.iter().any(|child| child.dirty.pending()));
-    instance.pending_static = matches!(&node, Node::Static(value) if instance.written < value.len)
+    instance.pending_static = matches!(&instance.element.0, Node::Static(value) if instance.written < value.len)
         || instance.children.iter().any(|child| child.pending_static);
     changed
 }
