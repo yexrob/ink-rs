@@ -117,3 +117,4 @@
 | [073](073-test-frame.md) | 2026-10-22 | `TestApp` 读屏：`live_frame` 和 `static_output` | 已实施 |
 | [074](074-color-level-node-cursor.md) | 2026-10-22 | `use_color_level` 和锚定节点的光标 | 已实施 |
 | [075](075-mouse.md) | 2026-10-22 | 鼠标：SGR 1006 解析、`use_mouse` 和命中测试 | 已实施 |
+| [076](076-release-0-1-7.md) | 2026-10-22 | 发布 0.1.7 | 进行中 |

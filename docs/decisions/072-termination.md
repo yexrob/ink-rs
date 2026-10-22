@@ -39,4 +39,5 @@ bingo 在 tokio 进程里处理 SIGINT、SIGTERM、SIGHUP：收到 SIGTERM 或 S
 - `59c06b2`：`Termination { Handled, Application }`、`set_termination` 和 `TerminationLocked`，在 `src/driver/process.rs`。Unix 和 Windows 的 `install_events` 调用 `fix_termination`：驱动第一次渲染时固定设置，之后设成不同的值返回 `TerminationLocked`，相同的值返回 `Ok(())`。`testing::mount` 和 `testing::render` 不装进程处理器，不读、不固定这个设置。design.md 的「恢复终端」一条补了说明。
 - 测试：pty 用例 `application-termination`。worker 报告无偏离；Windows 用目标 clippy 检查，没有在 Windows 上运行。
 - 全量测试由主 agent 在合入时跑过，通过。pty 用例「exit normally without unmount() or exit()」在负载下失败过一次，单独重跑通过。
+- tmux `ink-rs` 会话里的手动核对：临时程序在备用屏上渲染，从另一个 shell 发 `kill -TERM`。设成 `Application` 时应用的 `signal-hook` 处理器收到信号，ink-rs 不退出，应用 `unmount` 后备用屏关闭、光标显示、`icanon` 和 `echo` 复原；默认的 `Handled` 下进程以 143 退出，终端复原。
 - 没有推送，进 0.1.7。
