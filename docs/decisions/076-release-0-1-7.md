@@ -1,8 +1,8 @@
 # 发布 0.1.7
 
 - 日期：2026-10-22
-- 状态：进行中
-- 提交：
+- 状态：已实施
+- 提交：`1412de4` chore: release 0.1.7
 - Brief：无，主 agent 自己做
 
 ## 背景
@@ -33,3 +33,9 @@
 5. eink-rs 的依赖升级和推送放在它的发布记录里。
 
 ## 结果
+
+- `1412de4` 升版本号，排在本记录 `542e34b` 之后。本记录的提交里补了 072 的 tmux SIGTERM 核对和 075 的手动核对。
+- 本地：fmt、两套 feature 的 clippy 通过；默认 feature 1360 个、`--no-default-features` 1326 个测试通过；`cargo publish --dry-run` 通过。
+- 推送 main（`44da7fa..1412de4`），CI 运行 39768823690 的 7 个 job 通过。
+- `v0.1.7` 标签打在 `1412de4`，同 v0.1.6 为轻量标签；`cargo publish -p ink-rs` 发布 0.1.7。`ink-rs-macros` 维持 0.1.1。
+- eink-rs 升级依赖放在它的记录 030 里。
