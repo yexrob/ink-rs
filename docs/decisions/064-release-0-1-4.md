@@ -35,7 +35,7 @@
 
 - `854f030` 升版本号；验收中加了 `2f92fdd`（tokio 1.54.1）和 `a329d34`（帧率示例，见 [065](065-frame-rate-example.md)）。
 - 本地：fmt、两套 feature 的 clippy 通过；`--all-features` 1331 个、`--no-default-features` 1297 个测试通过；`cargo publish --dry-run` 打包 198 个文件，不含 `docs/` 和 `macros/`，没有警告。
-- 用户在 tmux 里看了 Markdown demo 和帧率示例，答「批准」。
+- 交给用户验收后，用户答「批准」。
 - 推送 main（`bf77756..656b6c8`），CI 运行 39722353083 的 7 个 job 通过。
 - `v0.1.4` 标签打在 `656b6c8`，同 v0.1.3 为轻量标签；`cargo publish -p ink-rs` 发布 0.1.4。`ink-rs-macros` 维持 0.1.1。
 - eink-rs 升级依赖见 eink-rs 的记录 017。
