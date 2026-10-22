@@ -8,6 +8,7 @@ const PASTE_END: &str = "\x1b[201~";
 pub(crate) enum InputEvent {
     Text(String),
     Paste(String),
+    StringSequence(String),
 }
 
 #[derive(Default)]
@@ -50,6 +51,16 @@ impl InputParser {
             let escape = index + offset;
             split_control_bytes(&self.pending[index..escape], &mut events);
             index = escape;
+            match string_sequence(&self.pending[escape..]) {
+                ControlSequence::Complete(length) => {
+                    let end = escape + length;
+                    events.push(InputEvent::StringSequence(self.pending[escape..end].into()));
+                    index = end;
+                    continue;
+                }
+                ControlSequence::Pending => break,
+                ControlSequence::Invalid => {}
+            }
             let Some(length) = escape_sequence_len(&self.pending[escape..]) else {
                 break;
             };
@@ -78,6 +89,9 @@ impl InputParser {
     }
 
     pub(crate) fn flush_pending_escape(&mut self) -> Option<String> {
+        if is_string_start(&self.pending) {
+            return Some(self.pending.drain(..2).collect());
+        }
         self.pending
             .starts_with('\x1b')
             .then(|| std::mem::take(&mut self.pending))
@@ -93,6 +107,39 @@ enum ControlSequence {
     Complete(usize),
     Pending,
     Invalid,
+}
+
+fn is_string_start(input: &str) -> bool {
+    input.starts_with('\x1b')
+        && input
+            .as_bytes()
+            .get(1)
+            .is_some_and(|byte| b"P]_X^".contains(byte))
+}
+
+fn string_sequence(input: &str) -> ControlSequence {
+    if !is_string_start(input) {
+        return ControlSequence::Invalid;
+    }
+    let bytes = input.as_bytes();
+    for (index, &byte) in bytes.iter().enumerate().skip(2) {
+        if byte == 0x07 {
+            return ControlSequence::Complete(index + 1);
+        }
+        if byte == 0x1b {
+            return match bytes.get(index + 1) {
+                Some(b'\\') => ControlSequence::Complete(index + 2),
+                None => ControlSequence::Pending,
+                _ => ControlSequence::Invalid,
+            };
+        }
+        // Reply payloads are printable ASCII. Controls and typed Unicode
+        // abandon the attempt so an Alt introducer cannot swallow those keys.
+        if !(0x20..=0x7e).contains(&byte) {
+            return ControlSequence::Invalid;
+        }
+    }
+    ControlSequence::Pending
 }
 
 fn control_sequence(input: &str, prefix: usize) -> ControlSequence {

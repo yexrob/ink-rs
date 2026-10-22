@@ -153,6 +153,7 @@ impl Runtime {
                     }
                     text
                 }
+                InputEvent::StringSequence(_) => continue,
             };
             self.emit_input(&text, pasted);
         }
@@ -176,6 +177,9 @@ impl Runtime {
             && !self.queue().has_exit()
         {
             self.emit_input(&text, false);
+            // String timeouts release the Alt introducer first; parse its tail
+            // through the ordinary input path, including control-key splitting.
+            self.input(&[], now);
         }
     }
 

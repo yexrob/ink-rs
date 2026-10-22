@@ -792,3 +792,75 @@ fn invalid_utf8_uses_maximal_subparts_across_reads() {
         vec![InputEvent::Text("\u{fffd}".into())]
     );
 }
+
+#[test]
+fn terminal_strings_have_their_own_events_with_either_terminator() {
+    for introducer in ["_", "P", "]", "X", "^"] {
+        for terminator in ["\x1b\\", "\x07"] {
+            let sequence = format!("\x1b{introducer}Gi=31;OK{terminator}");
+            assert_eq!(
+                parse_chunks(&[&sequence]),
+                vec![InputEvent::StringSequence(sequence)]
+            );
+        }
+    }
+}
+
+#[test]
+fn terminal_string_and_st_can_span_reads() {
+    assert_eq!(
+        parse_chunks(&["\x1b", "_Gi=", "31;OK", "\x1b", "\\x"]),
+        vec![
+            InputEvent::StringSequence("\x1b_Gi=31;OK\x1b\\".into()),
+            InputEvent::Text("x".into())
+        ]
+    );
+}
+
+#[test]
+fn terminal_string_timeout_preserves_alt_keys_and_the_tail() {
+    for introducer in ["P", "_"] {
+        let alt = format!("\x1b{introducer}");
+        let mut parser = InputParser::default();
+        assert!(parser.push(alt.as_bytes()).is_empty());
+        assert!(parser.has_pending_escape());
+        assert_eq!(parser.flush_pending_escape(), Some(alt.clone()));
+        assert_eq!(parser.push(b"x"), vec![InputEvent::Text("x".into())]);
+        assert!(parser.push(format!("{alt}abc").as_bytes()).is_empty());
+        assert_eq!(parser.flush_pending_escape(), Some(alt));
+        assert_eq!(parser.push(b""), vec![InputEvent::Text("abc".into())]);
+    }
+}
+
+#[test]
+fn invalid_string_payload_falls_back_without_swallowing_keys() {
+    for tail in ["\x03", "\r", "\t", "\x1b[A"] {
+        assert_eq!(
+            parse_chunks(&[&format!("\x1b_P{tail}")]),
+            [
+                vec![
+                    InputEvent::Text("\x1b_".into()),
+                    InputEvent::Text("P".into())
+                ],
+                parse_chunks(&[tail]),
+            ]
+            .concat()
+        );
+    }
+    assert_eq!(
+        parse_chunks(&["\x1b_P\u{4e2d}"]),
+        vec![
+            InputEvent::Text("\x1b_".into()),
+            InputEvent::Text("P\u{4e2d}".into())
+        ]
+    );
+}
+
+#[test]
+fn terminal_strings_in_paste_remain_raw() {
+    let payload = "\x1b_Gi=31;OK\x1b\\\x1b]52;c;YWJj\x07";
+    assert_eq!(
+        parse_chunks(&[&format!("\x1b[200~{payload}\x1b[201~")]),
+        vec![InputEvent::Paste(payload.into())]
+    );
+}
