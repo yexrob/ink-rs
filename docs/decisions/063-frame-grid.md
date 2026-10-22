@@ -1,8 +1,8 @@
 # 帧率：窗口不取整，晚醒不降速
 
 - 日期：2026-10-22
-- 状态：实施中
-- 提交：无
+- 状态：已实施
+- 提交：`762686d` feat(app): keep max_fps on a fixed frame grid
 - Brief：无，主 agent 自己做
 
 ## 背景
@@ -36,7 +36,8 @@ Claude 提出两处改法，说明代价是偏离 Ink 的节流语义。用户�
 - 以下由 Claude 按同一授权定：
   - 绘制：一帧比截止时间晚不到半个窗口，记在原来的格子上，下一个截止时间是「原截止时间 + 窗口」；晚半个窗口以上，从这一刻重新起格。
   - 动画：每个条目记一个格点锚，替代 `last_render` 的门槛作用（`last_render` 只留给 `delta`）。交付时，取这次 tick 所在的 interval 格点，比门槛晚不到半个窗口时，锚前移一个窗口；否则锚取这个格点。格点不含晚醒，interval 大于窗口的动画不会因为锚漂移丢 tick。
-  - 截止时间的公式不变，`last_render + throttle` 换成「锚 + 窗口」。
+  - 截止时间的公式不变，`last_render + throttle` 换成「锚 + 窗口」。（实施中改了，见下一条。）
+  - 实施中补的一条：被窗口挡住的 tick 保持到期，窗口一开就交付，截止时间是 `max(next_due, 锚 + 窗口)`，不再取下一个 interval 格点。复测时 `max_fps` 30 配 33ms 只有 15 fps：tick 比窗口早 0.33ms 被挡住，要等下一格。60 fps 配 16ms 是常见写法，同样会减半。Ink 也这样丢 tick。
   - `max_fps = 0` 仍是 0 窗口，行为不变。
   - runtime 仍不保存窗口，由 app 每步传入。
   - 不发布。推送和发布 0.1.4 等用户批准。
@@ -60,4 +61,24 @@ Claude 提出两处改法，说明代价是偏离 Ink 的节流语义。用户�
 
 ## 结果
 
-（落地后补）
+- `762686d`：
+  - `src/app.rs`：窗口改为 `1s / max_fps`，绘制后的截止时间用 `keep_slot`。
+  - `src/runtime/animation.rs`：`Entry` 加了 `slot`；挡住的 tick 保持到期；截止时间去掉格点取整。
+  - 新测试 `app::tests::late_wakes_keep_the_frame_rate`：直接驱动 `App`，每次唤醒晚 2ms，跑 1 秒，`max_fps` 120 下 interval 1ms、8ms 各约 120 帧，9ms 约 111 帧。改动前 1ms 只有 92 帧。
+  - 改了两处断言，都按新语义：
+    - runtime 单元测试的截止时间：150ms 改为 101ms，320ms 改为 261ms。
+    - 移植自 Ink 的 `animations_advance_in_debug_mode_when_interactive_is_false`：`"2"` 改为 `"3"`。Ink 原测试断言的是下界，仍成立。
+- `cargo test --all-features` 1331 个通过；`--no-default-features`、clippy、fmt 通过。
+- tmux 里复测（每组 3 秒，macOS）：
+
+| 配置 | 改前 | 改后 |
+|---|---|---|
+| `max_fps` 120，interval 1ms | 89 | 119 |
+| `max_fps` 120，interval 8ms | — | 120 |
+| `max_fps` 120，interval 9ms | 55 | 111 |
+| `max_fps` 60，interval 16ms | — | 60 |
+| `max_fps` 60，interval 17ms | 30 | 59 |
+| `max_fps` 30，interval 33ms | — | 30 |
+
+  单帧仍有约 2ms 的抖动（p10 到 p90），平均帧率达标。eink-rs 的 Markdown demo 用本地 ink-rs 构建（命令行 patch，不改文件），状态栏 121–123 fps。
+- 未推送，未发布。eink-rs 要等 ink-rs 发布 0.1.4 后升级依赖；demo 里 1ms interval 的注释到时改写。

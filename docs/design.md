@@ -73,7 +73,7 @@ ink-rs 是 Rust 版的 [Ink](https://github.com/vadimdemedes/ink)：用组件和
 - `dispatch(event)` 处理一个事件，`render_if_due(now)` 在需要时渲染一帧，返回下一次需要唤醒的时间 `Option<Instant>`，`None` 表示空闲。驱动按这个时间睡眠，空闲零唤醒由它保证。
 - 核心定义唤醒接口。其他线程经 `AppHandle` 提交更新，或 UI 线程上的任务写 `State`，两种情况通过它叫醒驱动。
 - 调度规则（批量更新、`max_fps`、空闲零唤醒）写在核心里，与驱动无关。测试驱动手动推进循环和假时钟。
-- **动画**：所有 `use_animation` 共用 Store 中的一个调度表，同 Ink App 的共享定时器。订阅从最近一步的时间开始，核心不读时钟。每步开头 tick：到期的条目按 Ink 的追赶公式 `start + (floor(elapsed / interval) + 1) * interval` 前移，迟到的唤醒跳过错过的格点，`frame` 随之跳变；条目记一个格点锚，未到「锚 + 窗口」的条目不写状态；交付时取这次 tick 的 interval 格点，比门槛晚不到半个窗口时锚前移一个窗口，否则锚取这个格点。格点不含晚醒，晚醒不降低帧率，interval 大于窗口的动画也不会因锚漂移丢 tick。Ink 的门槛是距上次交付一个窗口。截止时间是各条目在 `max(next_due, 锚 + 窗口)` 之后的第一个格点的最小值，节流窗口内的唤醒不发生。tick 经 `State::set` 写值。暂停、改 interval、`reset` 释放订阅，恢复时在 layout effect 中归零并重新订阅，归零值在同一帧写出。`testing::render` 与 `render_to_string` 用 0 窗口。
+- **动画**：所有 `use_animation` 共用 Store 中的一个调度表，同 Ink App 的共享定时器。订阅从最近一步的时间开始，核心不读时钟。每步开头 tick：到期的条目按 Ink 的追赶公式 `start + (floor(elapsed / interval) + 1) * interval` 前移，迟到的唤醒跳过错过的格点，`frame` 随之跳变；条目记一个格点锚，未到「锚 + 窗口」的条目不写状态，到期的 tick 保持到期，窗口一开就交付；Ink 丢掉这个 tick，等下一个格点，interval 略短于窗口时（60 fps 配 16ms）只剩一半。交付时取这次 tick 的 interval 格点，比门槛晚不到半个窗口时锚前移一个窗口，否则锚取这个格点。格点不含晚醒，晚醒不降低帧率，interval 大于窗口的动画也不会因锚漂移丢 tick。Ink 的门槛是距上次交付一个窗口。截止时间是各条目 `max(next_due, 锚 + 窗口)` 的最小值，节流窗口内的唤醒不发生。tick 经 `State::set` 写值。暂停、改 interval、`reset` 释放订阅，恢复时在 layout effect 中归零并重新订阅，归零值在同一帧写出。`testing::render` 与 `render_to_string` 用 0 窗口。
 - app 管理节流窗口，runtime 不保存节流窗口：动画的 tick 与截止时间按 app 每步传入的窗口计算。Static 有新条目或身份改变时，提交后的绘制满足待绘制帧，但不打开或延长窗口。`max_fps = 0` 使用 0 窗口，同 Ink 的非正值分支。
 
 驱动有三个：
