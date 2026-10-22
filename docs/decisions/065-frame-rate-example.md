@@ -1,8 +1,8 @@
 # 帧率示例 `frame-rate`
 
 - 日期：2026-10-22
-- 状态：实施中
-- 提交：无
+- 状态：已实施
+- 提交：`a329d34` feat(examples): add a frame-rate example
 - Brief：无，主 agent 自己做
 
 ## 背景
@@ -35,4 +35,16 @@
 
 ## 结果
 
-（实施后补）
+- `a329d34`：`examples/frame-rate.rs`，`Cargo.toml` 注册，README 和 design.md 各补一句。
+- `cargo test --all-features` 1331 个通过，`--no-default-features` 1297 个通过；clippy、fmt 通过；`cargo publish --dry-run` 打包 198 个文件，含这个示例。
+- tmux 里三档同时跑（全量测试同时在跑，CPU 有负载）：
+
+| `max_fps` | interval | 实测 | 帧间隔 p50 / p90 |
+|---|---|---|---|
+| 120 | 8ms | 120.0 fps | 8.32 / 8.56 ms |
+| 60 | 16ms | 60.1 fps | 16.63 / 17.19 ms |
+| 30 | 33ms | 30.0 fps | 33.63 / 36.57 ms |
+| 120 | 9ms（↑ 调到） | 111.2 fps | 9.15 / 9.55 ms |
+| 60 | 9ms（↓ 调到） | 60.0 fps | 16.34 / 19.04 ms |
+
+  interval 超过窗口时按 interval 的节拍走，不超过时跑满 `max_fps`。
