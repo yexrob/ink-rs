@@ -3,7 +3,6 @@ use taffy::{NodeId, Point};
 use crate::components::TextStyle;
 use crate::host::{HostTree, LineTransform, text_style};
 use crate::style::BorderSide;
-use crate::text::measure::measure_text;
 use crate::text::styled::{self, CharStyle, StyledChar, StyledLine, StyledText};
 use crate::text::width::{grapheme_width, is_default_ignorable};
 use crate::text::wrap::wrap_text;
@@ -306,17 +305,21 @@ fn walk(
         y: offset.paint.y + layout.location.y as i32,
     };
     if let Some(text) = &props.text {
-        let mut lines = text.squash();
+        let (lines, natural) = tree.node(node).squashed();
         let width = (layout.size.width
             - layout.padding.left
             - layout.padding.right
             - layout.border.left
             - layout.border.right)
             .max(0.0) as usize;
-        if measure_text(&lines).width > width {
-            lines = wrap_text(&lines, width, text.wrap);
-        }
-        write(output, origin, &lines, clip, Some(&text.transform));
+        let wrapped;
+        let lines = if natural.width > width {
+            wrapped = wrap_text(lines, width, text.wrap);
+            &wrapped
+        } else {
+            lines
+        };
+        write(output, origin, lines, clip, Some(&text.transform));
         return;
     }
     decoration(

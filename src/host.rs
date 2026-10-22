@@ -1,8 +1,10 @@
+use std::cell::OnceCell;
 use std::rc::Rc;
 
 use taffy::{Cache, Layout, NodeId, Size};
 
 use crate::components::TextStyle;
+use crate::text::measure::{TextSize, measure_text};
 use crate::text::styled::{self, CharStyle, StyledLine, StyledText};
 use crate::{ColorLevel, Style, TextWrap};
 
@@ -15,12 +17,28 @@ pub(crate) struct LayoutNode {
     pub(crate) parent: Option<NodeId>,
     pub(crate) children: Vec<NodeId>,
     pub(crate) props: HostNode,
+    /// Squashed text and its natural size, kept until the props change.
+    squashed: OnceCell<(StyledText, TextSize)>,
     pub(crate) style: taffy::Style,
     pub(crate) cache: Cache,
     pub(crate) layout: Layout,
     pub(crate) hoisted_children: Vec<NodeId>,
     pub(crate) available_inner_size: Size<Option<f32>>,
     pub(crate) definite_inner_size: Size<Option<f32>>,
+}
+
+impl LayoutNode {
+    /// Squashes a text node on its first measurement or paint. Both run
+    /// outside the render guard, so a nested transform's panic stays uncaught
+    /// as it does in Ink's output phase.
+    pub(crate) fn squashed(&self) -> (&StyledText, TextSize) {
+        let (lines, size) = self.squashed.get_or_init(|| {
+            let lines = self.props.text.as_ref().expect("text node").squash();
+            let size = measure_text(&lines);
+            (lines, size)
+        });
+        (lines, *size)
+    }
 }
 
 impl HostTree {
@@ -199,6 +217,7 @@ fn create(tree: &mut HostTree, props: HostNode) -> NodeId {
         children: Vec::new(),
         style: taffy::Style::default(),
         props: props.clone(),
+        squashed: OnceCell::new(),
         cache: Cache::new(),
         layout: Layout::default(),
         hoisted_children: Vec::new(),
@@ -215,8 +234,10 @@ pub(crate) fn set_props(tree: &mut HostTree, node: NodeId, props: HostNode) {
         props.text.is_none() || tree.children(node).is_empty(),
         "text is a layout leaf"
     );
-    tree.node_mut(node).style = crate::layout::map_style(&props.style);
-    tree.node_mut(node).props = props;
+    let layout = tree.node_mut(node);
+    layout.style = crate::layout::map_style(&props.style);
+    layout.props = props;
+    layout.squashed = OnceCell::new();
     tree.mark_dirty(node);
 }
 

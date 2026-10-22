@@ -33,6 +33,7 @@ macOS `sample` 的采样里，eink-rs 的代码不到帧时间的 10%，其余�
   - 不做 AtMost 改写、绘制限于可见行、`Element` 子节点改 `Rc`。
   - 目标（eink-rs `markdown-stress`，release）：第一个场景 p50 ≤ 20 ms，第二个 p50 ≤ 10 ms，其余场景不退步。
 - Claude 按同一方案定：撤掉本地没推送的 a777065（升 0.1.5 版本号），性能提交合入后升版本号，发布提交排在最后。
+- Claude 定（review Codex 的实现）：squash 缓存在节点第一次测量或绘制时填，`set_props` 只清空它。Codex 在 `set_props` 里填，嵌套 Transform 因此在 reconcile 的 panic guard 里运行，为让它的 panic 不被捕获，Codex 加了 `uncaught` 包装和 `Uncaught` 载荷。改到布局和绘制时填，squash 和改动前一样在 guard 外运行，这套机制和为它加的测试都不需要。Transform 的调用次数不变：文本 props 每变化一次，至多调用一次。
 
 ## 备选与取舍
 

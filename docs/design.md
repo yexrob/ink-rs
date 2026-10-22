@@ -148,10 +148,10 @@ M0 的 API（`src/lib.rs`）：
 - **布局**用 taffy 的 flexbox 算法，开放 Ink 用到的属性。host 树实现 taffy 的底层 trait（不用 `TaffyTree`），跨帧保留，每帧重算变化的节点。与 Yoga 的差异分两处抹平。样式映射：根节点用 Yoga 的默认值；没设最小尺寸的节点最小尺寸为 0（Yoga 没有 min-content 下限）；文本宽度向上取整；`position: static` 映射成 relative 并忽略 inset。布局时由 host 树调整子节点的测量约束和样式：自动尺寸的子项以容器的可用尺寸为上限测量 flex basis（Yoga 的 AtMost，taffy 按 max-content）；设了 aspect ratio 的子项由主轴尺寸推出交叉轴尺寸，不看交叉轴的尺寸和 stretch。后者经子项的样式视图实现：交叉轴尺寸改为 auto，确定的交叉尺寸按比例换到主轴，stretch 改为 flex-start。taffy 在伸缩前定下交叉尺寸，主轴经 grow / shrink 改变后不按比例重算，这一点与 Yoga 不同。有子项按 baseline 对齐时，Yoga 按内容决定行高，这一点不复刻，记在 `ink-tests.md`。
 - **ANSI**：用户传入的字符串在 `Text` 边界解析一次。保留 SGR 和 OSC 8 超链接，去掉其他控制序列与 C0 控制字符（制表符和换行除外），防止外部内容移动光标。超链接以外的 OSC（窗口标题、剪贴板等）在解析时丢掉。超链接记下原始参数和终止符（BEL 或 ST），输出时还原。
 - **样式叠加**：`Text` 的样式按"内层没设的属性由外层补上"叠加到字素上，不复刻 chalk 的字符串包裹。props 里的颜色按 `color_level` 降级（同 chalk）；用户传入的原始 SGR 不降级。`Color::Reset` 表示终端默认前景色或背景色，不添加 SGR；用于 `Text::background_color` 时阻断 `View` 的背景继承，对应 Ink 的 `backgroundColor=""`，嵌套 Text 保留外层 Text 的样式。
-- **Transform**：把一行序列化成字符串交给用户函数，解析返回值。
+- **Transform**：把一行序列化成字符串交给用户函数，解析返回值。`Text` 里嵌套的 Transform 在文本节点 squash 时调用：文本 props 变化后，第一次测量或绘制时调用一次。Ink 在每次测量和渲染时调用，函数没有副作用时两者输出相同。外层 Transform 在每次绘制时调用，同 Ink。
 - **断行**同 wrap-ansi：在空格处断行，单词超过行宽时按字素硬断，不去掉首尾空格。`Wrap` 和 `Hard` 对进入换行处理的各行做 NFC 归一化，同 wrap-ansi；放得下的文本和截断模式不做归一化。不按 UAX #14：一段连续的中日韩文字放得进下一行时，wrap-ansi 把整段移到下一行，UAX #14 在当前行行尾断开，Ink 的测试期望是前者。截断同 cli-truncate，按行进行：首尾截断时省略号取保留一侧的样式，不带超链接；中间截断和只剩 1 列时省略号不带样式。换行与截断模式同 Ink：`Wrap`、`Hard`、`TruncateStart`、`TruncateMiddle`、`TruncateEnd`。
 - **宽度**按字素簇（unicode-segmentation）计算，规则同 string-width 8.3：零宽字素不占格，emoji 序列和东亚宽字符占 2 格，东亚歧义宽度按 1 格。属性表由 `scripts/gen_width_data.py` 从 Unicode 18.0.0 数据生成，这是 get-east-asian-width 1.7.0 使用的版本；东亚宽度遵循 get-east-asian-width，W/F 占 2 格，其余占 1 格。Ink 的其他属性来自 Node 的 ICU，因此在旧版 Node 上，Ink 与 ink-rs 对 Unicode 18.0 新字符的处理可能不同。公开的 `text_width(&str)` 返回渲染给最宽一行的列数：ANSI 序列不占格，制表符按 8 列展开。`use_cursor` 的列要与渲染一致，`unicode-width` 在 ZWJ emoji 与谚文字母上给出不同的宽度。
-- **测量缓存**用各节点的 taffy 布局缓存。节点变更时清掉它和祖先的缓存，同 Yoga 的 `markDirty`。不做 Ink 按字符串的全局缓存：那是每帧重新拼字符串的结果，常驻树用不到。
+- **测量缓存**有两层。文本节点在 props 变化后第一次测量或绘制时 squash 行内树、展开制表符，结果和自然宽高存在 host 节点上，到下一次 props 变化为止；测量和绘制读它，按宽度断行在用到时做。布局用各节点的 taffy 布局缓存。节点变更时清掉它和祖先的缓存，同 Yoga 的 `markDirty`。不做 Ink 按字符串的全局缓存：那是每帧重新拼字符串的结果，常驻树用不到。
 
 ## 终端输出
 

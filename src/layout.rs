@@ -83,8 +83,7 @@ impl t::LayoutPartialTree for HostTree {
                         let Some(text) = tree.node(node).props.text.as_ref() else {
                             return Size::ZERO;
                         };
-                        let lines = text.squash();
-                        let natural = measure_text(&lines);
+                        let (lines, natural) = tree.node(node).squashed();
                         // Ink dom.ts treats both intrinsic requests as Yoga's undefined mode.
                         let width = known.width.or(match available.width {
                             AvailableSpace::Definite(width) => Some(width),
@@ -93,11 +92,8 @@ impl t::LayoutPartialTree for HostTree {
                         let measured = if let Some(width) =
                             width.filter(|&width| (natural.width as f32) > width)
                         {
-                            let measured = measure_text(&wrap_text(
-                                &lines,
-                                width.max(0.0) as usize,
-                                text.wrap,
-                            ));
+                            let measured =
+                                measure_text(&wrap_text(lines, width.max(0.0) as usize, text.wrap));
                             Size {
                                 width: if matches!(text.wrap, TextWrap::Wrap | TextWrap::Hard) {
                                     measured.width as f32
