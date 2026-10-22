@@ -77,6 +77,7 @@ pub(super) struct ProcessTerminal {
     state: Arc<Mutex<RestoreState>>,
     tty: bool,
     input: Arc<stdin::Target>,
+    pub(super) tmux: bool,
 }
 
 impl ProcessTerminal {
@@ -101,6 +102,7 @@ impl ProcessTerminal {
             state: Arc::new(Mutex::new(state)),
             tty: sys::stdout_is_tty(),
             input: Arc::new(stdin::Target::new(sender, failure)),
+            tmux: false,
         }
     }
 
@@ -194,6 +196,9 @@ impl Terminal for ProcessTerminal {
 
     fn size(&self) -> Option<(u16, u16)> {
         sys::size()
+    }
+    fn tmux(&self) -> bool {
+        self.tmux
     }
     fn is_tty(&self) -> bool {
         self.tty

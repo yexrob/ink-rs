@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use crate::output::Output;
 use crate::paint::{Cell, Frame, serialize_row};
-use crate::runtime::{ExitResult, Runtime, UpdateQueue, WriteDestination, keep_slot};
+use crate::runtime::{ExitResult, Runtime, UpdateQueue, WriteDestination, keep_slot, passthrough};
 use crate::terminal::Terminal;
 use crate::text::ansi::{Token, tokenize};
 use crate::{
@@ -326,8 +326,10 @@ impl WriteDestination for RefCell<AppOutput> {
         self.borrow_mut().external_write(stream, data);
     }
 
-    fn write_control(&self, stream: OutputStream, bytes: &[u8]) {
-        self.borrow_mut().control.push((stream, bytes.to_vec()));
+    fn write_control(&self, stream: OutputStream, bytes: &[u8], outer: bool) {
+        let mut output = self.borrow_mut();
+        let bytes = passthrough(bytes, outer && output.terminal.tmux());
+        output.control.push((stream, bytes));
     }
 }
 

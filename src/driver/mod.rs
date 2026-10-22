@@ -76,8 +76,9 @@ fn mount<S: Post>(
     if !sys::JOB_CONTROL {
         options.suspend_on_ctrl_z = false;
     }
-    let terminal = ProcessTerminal::new(sender.clone());
+    let mut terminal = ProcessTerminal::new(sender.clone());
     let env = |key: &str| std::env::var_os(key).map(|value| value.to_string_lossy().into_owned());
+    terminal.tmux = env("TMUX").is_some();
     let interactive = resolve_interactive(
         options.interactive,
         environment::in_ci(env),

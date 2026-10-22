@@ -3,6 +3,21 @@ use std::thread::{self, ThreadId};
 
 use super::state::{Store, assert_not_rendering, resolve_store};
 
+pub(crate) fn passthrough(bytes: &[u8], tmux: bool) -> Vec<u8> {
+    if !tmux {
+        return bytes.to_vec();
+    }
+    let mut wrapped = b"\x1bPtmux;".to_vec();
+    for &byte in bytes {
+        wrapped.push(byte);
+        if byte == 0x1b {
+            wrapped.push(byte);
+        }
+    }
+    wrapped.extend_from_slice(b"\x1b\\");
+    wrapped
+}
+
 /// A position in cells from the live frame's top-left, below Static output.
 /// Coordinates are zero-based; the output layer clips them to the visible frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -24,7 +39,8 @@ pub enum OutputStream {
 
 pub(crate) trait WriteDestination {
     fn write(&self, stream: OutputStream, data: &str);
-    fn write_control(&self, stream: OutputStream, bytes: &[u8]);
+    /// `outer` bytes are meant for the terminal outside tmux.
+    fn write_control(&self, stream: OutputStream, bytes: &[u8], outer: bool);
 }
 
 /// A copyable UI-thread writer returned by [`super::Scope::use_stdout`] or
@@ -89,13 +105,27 @@ impl OutputWriter {
     /// ([`crate::testing::render`]), writes are dropped.
     #[track_caller]
     pub fn write_control(self, bytes: impl AsRef<[u8]>) {
+        self.control(bytes.as_ref(), false);
+    }
+
+    /// Queues bytes for the outer terminal with [`Self::write_control`]'s
+    /// timing and rules. When TMUX was set at mount, each call becomes one
+    /// tmux passthrough sequence; tmux requires `allow-passthrough on`.
+    /// Send one command per call. This method does not chunk data; callers
+    /// transmitting kitty data split it into chunks of 4096 bytes.
+    #[track_caller]
+    pub fn write_passthrough(self, bytes: impl AsRef<[u8]>) {
+        self.control(bytes.as_ref(), true);
+    }
+
+    #[track_caller]
+    fn control(self, bytes: &[u8], outer: bool) {
         assert_eq!(
             self.thread,
             thread::current().id(),
             "output access off the UI thread"
         );
         assert_not_rendering();
-        let bytes = bytes.as_ref();
         if bytes.is_empty() {
             return;
         }
@@ -107,7 +137,7 @@ impl OutputWriter {
         }
         let destination = store.destination.borrow().clone();
         if let Some(destination) = destination {
-            destination.write_control(self.stream, bytes);
+            destination.write_control(self.stream, bytes, outer);
         }
     }
 }
@@ -118,5 +148,20 @@ impl Drop for CursorCleanup {
     fn drop(&mut self) {
         // Ink use-cursor.ts clears the shared position regardless of its owner.
         self.0.cursor.set(None);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::passthrough;
+
+    #[test]
+    fn tmux_passthrough_doubles_every_escape() {
+        let bytes = b"\x1b_Gi=31;OK\x1b\\";
+        assert_eq!(passthrough(bytes, false), bytes);
+        assert_eq!(
+            passthrough(bytes, true),
+            b"\x1bPtmux;\x1b\x1b_Gi=31;OK\x1b\x1b\\\x1b\\"
+        );
     }
 }

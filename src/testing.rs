@@ -95,7 +95,7 @@ impl WriteDestination for RefCell<DebugOutput> {
         output.frames.push(frame);
     }
 
-    fn write_control(&self, _stream: OutputStream, _bytes: &[u8]) {}
+    fn write_control(&self, _stream: OutputStream, _bytes: &[u8], _outer: bool) {}
 }
 
 impl TestInstance {

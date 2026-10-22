@@ -11,6 +11,9 @@ pub(crate) trait Terminal {
         None
     }
     fn size(&self) -> Option<(u16, u16)>;
+    fn tmux(&self) -> bool {
+        false
+    }
     fn is_tty(&self) -> bool;
     /// Whether stdin supports raw mode.
     fn stdin_is_tty(&self) -> bool;
