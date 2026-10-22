@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::io::{self, Write};
 use std::panic;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -77,7 +78,9 @@ pub(super) struct ProcessTerminal {
     state: Arc<Mutex<RestoreState>>,
     tty: bool,
     input: Arc<stdin::Target>,
+    cell_pixels: Cell<Option<(u16, u16)>>,
     pub(super) tmux: bool,
+    pub(super) graphics_allowed: bool,
 }
 
 impl ProcessTerminal {
@@ -102,7 +105,9 @@ impl ProcessTerminal {
             state: Arc::new(Mutex::new(state)),
             tty: sys::stdout_is_tty(),
             input: Arc::new(stdin::Target::new(sender, failure)),
+            cell_pixels: Cell::new(None),
             tmux: false,
+            graphics_allowed: true,
         }
     }
 
@@ -195,10 +200,18 @@ impl Terminal for ProcessTerminal {
     }
 
     fn size(&self) -> Option<(u16, u16)> {
-        sys::size()
+        let size = sys::size();
+        self.cell_pixels.set(size.and_then(|size| size.cell_pixels));
+        size.map(|size| size.cells)
+    }
+    fn cell_pixels(&self) -> Option<(u16, u16)> {
+        self.cell_pixels.get()
     }
     fn tmux(&self) -> bool {
         self.tmux
+    }
+    fn graphics_allowed(&self) -> bool {
+        self.graphics_allowed
     }
     fn is_tty(&self) -> bool {
         self.tty

@@ -1,5 +1,9 @@
 use crate::ColorLevel;
 
+pub(super) fn graphics_allowed(env: impl Fn(&str) -> Option<String>) -> bool {
+    env("TERM_PROGRAM").as_deref() != Some("WezTerm") && env("KONSOLE_VERSION").is_none()
+}
+
 pub(super) fn in_ci(env: impl Fn(&str) -> Option<String>) -> bool {
     ["CI", "CONTINUOUS_INTEGRATION"]
         .iter()

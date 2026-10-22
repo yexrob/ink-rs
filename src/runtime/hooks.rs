@@ -17,6 +17,7 @@ type Setup = Box<dyn FnOnce() -> Box<dyn Any>>;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Kind {
     WindowSize,
+    Graphics,
     NodeRef,
     State(TypeId),
     Provide(TypeId),
@@ -36,6 +37,7 @@ pub(super) struct Effect {
 
 pub(super) enum Value {
     WindowSize,
+    Graphics,
     NodeRef {
         handle: NodeRef,
         slot: StateSlot,
@@ -176,6 +178,25 @@ impl Scope<'_> {
         // Ink use-window-size.ts rechecks at subscription. Reading during
         // render registers the reader before any commit effects can resize.
         self.store.window_size.get()
+    }
+
+    /// Probes for kitty graphics with Unicode placeholders on the first call.
+    /// Changes to support or cell pixel size schedule this component. The probe
+    /// runs once per app; non-interactive, non-TTY, string and debug renders
+    /// return Unsupported without querying the terminal.
+    pub fn use_graphics(&mut self) -> super::Graphics {
+        let index = self.position(Kind::Graphics);
+        if index == self.hooks.len() {
+            self.hooks.push(Hook {
+                kind: Kind::Graphics,
+                value: Value::Graphics,
+            });
+        }
+        let mut graphics = self.store.graphics.borrow_mut();
+        if graphics.value.support == super::GraphicsSupport::Probing {
+            graphics.requested = true;
+        }
+        graphics.value
     }
 
     /// Drives an animation using the runtime's shared timer. Values start at zero.

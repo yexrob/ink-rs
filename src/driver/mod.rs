@@ -79,6 +79,7 @@ fn mount<S: Post>(
     let mut terminal = ProcessTerminal::new(sender.clone());
     let env = |key: &str| std::env::var_os(key).map(|value| value.to_string_lossy().into_owned());
     terminal.tmux = env("TMUX").is_some();
+    terminal.graphics_allowed = environment::graphics_allowed(env);
     let interactive = resolve_interactive(
         options.interactive,
         environment::in_ci(env),

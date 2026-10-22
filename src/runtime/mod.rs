@@ -26,6 +26,7 @@ mod context;
 mod focus;
 #[cfg(feature = "tokio")]
 mod future;
+mod graphics;
 mod hooks;
 mod input;
 mod output;
@@ -40,6 +41,7 @@ pub use animation::{Animation, AnimationOptions};
 pub use app_handle::{AlreadySuspended, AppHandle};
 pub(crate) use app_handle::{ExitResult, UpdateQueue, Wake};
 pub use focus::{FocusManager, FocusOptions};
+pub use graphics::{Graphics, GraphicsSupport};
 pub use hooks::Scope;
 pub use output::{CursorPosition, OutputStream, OutputWriter};
 pub(crate) use output::{WriteDestination, passthrough};
@@ -204,12 +206,12 @@ struct Instance {
 }
 
 impl Instance {
-    fn invalidate_window_size(&self) {
-        if self.hooks.iter().any(|hook| hook.kind == Kind::WindowSize) {
+    fn invalidate_readers(&self, kind: Kind) {
+        if self.hooks.iter().any(|hook| hook.kind == kind) {
             self.dirty.mark();
         }
         for child in &self.children {
-            child.invalidate_window_size();
+            child.invalidate_readers(kind);
         }
     }
 
@@ -250,7 +252,7 @@ impl Instance {
         // deletion effects and state detachment belong to the post-present phase.
         for hook in self.hooks.drain(..) {
             match hook.value {
-                Value::WindowSize => {}
+                Value::WindowSize | Value::Graphics => {}
                 Value::NodeRef { slot, .. } => drop(slot),
                 Value::State { slot, .. } => cleanups.states.push_back(Box::new(slot)),
                 Value::Effect(mut effect) => {
@@ -451,7 +453,7 @@ impl Runtime {
             host::set_props(&mut self.tree, self.root, props);
         }
         self.layout_pending = true;
-        self.instance.invalidate_window_size();
+        self.instance.invalidate_readers(Kind::WindowSize);
     }
 
     pub(crate) fn rerender(&mut self, element: Element) {

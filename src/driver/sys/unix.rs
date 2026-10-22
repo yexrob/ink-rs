@@ -39,10 +39,17 @@ pub(in crate::driver) fn stdin_is_tty() -> bool {
     io::stdin().is_terminal()
 }
 
-pub(in crate::driver) fn size() -> Option<(u16, u16)> {
+pub(in crate::driver) fn size() -> Option<crate::terminal::TerminalSize> {
     rustix::termios::tcgetwinsize(io::stdout())
         .ok()
-        .map(|size| (size.ws_col, size.ws_row))
+        .map(|size| crate::terminal::TerminalSize {
+            cells: (size.ws_col, size.ws_row),
+            cell_pixels: size
+                .ws_xpixel
+                .checked_div(size.ws_col)
+                .zip(size.ws_ypixel.checked_div(size.ws_row))
+                .filter(|&(width, height)| width > 0 && height > 0),
+        })
 }
 
 pub(in crate::driver) fn enter_raw_mode() -> io::Result<SavedMode> {

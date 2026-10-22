@@ -186,6 +186,7 @@ pub(super) struct Store {
     pub(super) input: RefCell<super::input::InputState>,
     pub(crate) queue: Arc<UpdateQueue>,
     pub(super) window_size: Cell<WindowSize>,
+    pub(super) graphics: RefCell<super::graphics::GraphicsState>,
     pub(super) id: u64,
     pub(super) cursor: Cell<Option<CursorPosition>>,
     pub(super) animation: RefCell<super::animation::AnimationState>,
@@ -219,6 +220,7 @@ impl Store {
             focus: RefCell::default(),
             box_readers: RefCell::default(),
             input: RefCell::default(),
+            graphics: RefCell::default(),
             queue: Arc::default(),
             window_size: Cell::new(WindowSize {
                 columns: 80,

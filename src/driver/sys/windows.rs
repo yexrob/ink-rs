@@ -129,17 +129,20 @@ pub(in crate::driver) fn stdin_is_tty() -> bool {
     mode(io::stdin().as_handle()).is_ok()
 }
 
-pub(in crate::driver) fn size() -> Option<(u16, u16)> {
+pub(in crate::driver) fn size() -> Option<crate::terminal::TerminalSize> {
     let stdout = io::stdout();
     let mut info = CONSOLE_SCREEN_BUFFER_INFO::default();
     // SAFETY: stdout supplies the handle and info is an initialized out-parameter.
     if unsafe { GetConsoleScreenBufferInfo(stdout.as_raw_handle(), &mut info) } == 0 {
         return None;
     }
-    Some((
-        info.dwSize.X as u16,
-        (i32::from(info.srWindow.Bottom) - i32::from(info.srWindow.Top) + 1) as u16,
-    ))
+    Some(crate::terminal::TerminalSize {
+        cells: (
+            info.dwSize.X as u16,
+            (i32::from(info.srWindow.Bottom) - i32::from(info.srWindow.Top) + 1) as u16,
+        ),
+        cell_pixels: None,
+    })
 }
 
 pub(in crate::driver) fn enter_raw_mode() -> io::Result<SavedMode> {

@@ -55,7 +55,7 @@ impl Drop for Registration {
         input
             .handlers
             .retain(|handler| !handler.same(&self.handler));
-        if input.handlers.is_empty() {
+        if input.handlers.is_empty() && !self.store.graphics.borrow().probing() {
             // Ink App.clearInputState runs at zero holders, before the deferred
             // terminal switch, including during a same-commit component swap.
             input.parser.reset();
@@ -106,7 +106,7 @@ impl Runtime {
     }
 
     pub(crate) fn input(&mut self, bytes: &[u8], now: Instant) -> bool {
-        if self.input_holders() == 0 || self.queue().has_exit() {
+        if (self.input_holders() == 0 && !self.graphics_probing()) || self.queue().has_exit() {
             return false;
         }
         let mut query_response = false;
@@ -122,6 +122,9 @@ impl Runtime {
             let pasted = matches!(&event, InputEvent::Paste(_));
             let text = match event {
                 InputEvent::Text(text) => {
+                    if self.graphics_reply(&text) {
+                        continue;
+                    }
                     if is_query_response(&text) {
                         query_response = true;
                         continue;
@@ -153,7 +156,10 @@ impl Runtime {
                     }
                     text
                 }
-                InputEvent::StringSequence(_) => continue,
+                InputEvent::StringSequence(text) => {
+                    self.graphics_reply(&text);
+                    continue;
+                }
             };
             self.emit_input(&text, pasted);
         }
@@ -204,6 +210,11 @@ impl Runtime {
             && parsed.event_type != Some(KeyEventType::Release)
         {
             self.stop_requested = true;
+            return;
+        }
+        // A graphics probe reads input with no input hook. Ctrl+C and Ctrl+Z
+        // above stand in for the signals that raw mode turns off.
+        if self.input_holders() == 0 {
             return;
         }
         // Ink's App effect installs Tab after mount-time input listeners.

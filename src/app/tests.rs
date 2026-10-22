@@ -341,3 +341,102 @@ fn late_wakes_keep_the_frame_rate() {
         );
     }
 }
+
+#[test]
+fn graphics_uses_driver_pixels_and_tmux_passthrough() {
+    use crate::terminal::Terminal;
+    use crate::{Graphics, GraphicsSupport};
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+
+    struct GraphicsTerminal {
+        terminal: TestTerminal,
+        pixels: Rc<Cell<Option<(u16, u16)>>>,
+    }
+    impl Terminal for GraphicsTerminal {
+        fn write(&mut self, bytes: &[u8], restore: &[u8]) {
+            Terminal::write(&mut self.terminal, bytes, restore);
+        }
+        fn write_stderr(&mut self, bytes: &[u8], restore: &[u8]) {
+            self.terminal.write_stderr(bytes, restore);
+        }
+        fn size(&self) -> Option<(u16, u16)> {
+            self.terminal.size()
+        }
+        fn cell_pixels(&self) -> Option<(u16, u16)> {
+            self.pixels.get()
+        }
+        fn is_tty(&self) -> bool {
+            true
+        }
+        fn stdin_is_tty(&self) -> bool {
+            true
+        }
+        fn set_raw_mode(&mut self, enabled: bool) {
+            self.terminal.set_raw_mode(enabled);
+        }
+        fn tmux(&self) -> bool {
+            true
+        }
+    }
+    let terminal = TestTerminal::new(80, 24);
+    let pixels = Rc::new(Cell::new(Some((8, 16))));
+    let values = Rc::new(RefCell::new(Vec::<Graphics>::new()));
+    let now = Instant::now();
+    let mut app = App::new(
+        component(
+            |cx: &mut Scope, values: &Rc<RefCell<Vec<Graphics>>>| {
+                values.borrow_mut().push(cx.use_graphics());
+                let output = cx.use_stdout();
+                cx.use_effect((), move || output.write_passthrough(b"\x1b]2;title\x07"));
+                Element::empty()
+            },
+            values.clone(),
+        ),
+        Options::default(),
+        Box::new(GraphicsTerminal {
+            terminal: terminal.clone(),
+            pixels: pixels.clone(),
+        }),
+        true,
+        ColorLevel::Basic,
+        now,
+    );
+    app.render_if_due(now);
+    let writes = terminal.writes();
+    let query = writes
+        .iter()
+        .position(|bytes| {
+            bytes == "\x1bPtmux;\x1b\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\x1b\\\x1b\\"
+        })
+        .unwrap();
+    assert_eq!(writes[query + 1], "\x1b[16t");
+    assert_eq!(writes[query + 2], "\x1bPtmux;\x1b\x1b[c\x1b\\");
+    assert!(
+        writes
+            .iter()
+            .any(|bytes| bytes == "\x1bPtmux;\x1b\x1b]2;title\x07\x1b\\")
+    );
+    assert_eq!(values.borrow().last().unwrap().cell_pixels, Some((8, 16)));
+    app.input(b"\x1b[6;20;10t\x1b[?1c", now);
+    app.render_if_due(now);
+    assert_eq!(
+        values.borrow().last(),
+        Some(&Graphics {
+            support: GraphicsSupport::Unsupported,
+            cell_pixels: Some((8, 16)),
+        })
+    );
+    pixels.set(Some((12, 24)));
+    app.resize(Some((80, 24)));
+    app.render_if_due(now);
+    assert_eq!(values.borrow().last().unwrap().cell_pixels, Some((12, 24)));
+    pixels.set(None);
+    app.resize(Some((80, 24)));
+    app.render_if_due(now);
+    assert_eq!(values.borrow().last().unwrap().cell_pixels, Some((10, 20)));
+    let count = values.borrow().len();
+    app.resize(Some((80, 24)));
+    app.render_if_due(now);
+    assert_eq!(values.borrow().len(), count);
+}

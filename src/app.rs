@@ -380,6 +380,7 @@ impl App {
             return;
         }
         self.kitty_query = None;
+        self.runtime.as_mut().unwrap().finish_graphics(true);
         self.runtime.as_mut().unwrap().pause_input();
         let mut output = self.destination.borrow_mut();
         let mut bytes = output.restore_modes();
@@ -498,6 +499,10 @@ impl App {
             },
         );
         runtime.resize(size);
+        runtime.configure_graphics(
+            interactive && tty && terminal.stdin_is_tty() && terminal.graphics_allowed(),
+        );
+        runtime.resize_graphics(terminal.cell_pixels());
         runtime.catch = true;
         runtime.exit_on_ctrl_c = options.exit_on_ctrl_c;
         runtime.suspend_on_ctrl_z = options.suspend_on_ctrl_z;
@@ -571,6 +576,7 @@ impl App {
         destination.columns = usize::from(size.columns);
         destination.rows = usize::from(size.rows);
         runtime.resize(size);
+        runtime.resize_graphics(destination.terminal.cell_pixels());
     }
 
     pub(crate) fn rerender(&mut self, element: Element) {
@@ -588,9 +594,11 @@ impl App {
             self.kitty_query = None;
         }
         let runtime = self.runtime.as_mut()?;
+        runtime.expire_graphics(now);
         runtime.tick_animations(now, self.window);
         runtime.flush_input(now);
         if runtime.take_stop_request() {
+            runtime.finish_graphics(true);
             self.destination.borrow_mut().terminal.stop_process();
         }
         runtime.queue().drain();
@@ -644,7 +652,7 @@ impl App {
             )
             .into()));
         }
-        let raw_mode = stdin_tty && holders > 0;
+        let raw_mode = stdin_tty && (holders > 0 || runtime.graphics_probing());
         let paste_mode = raw_mode && runtime.paste_holders() > 0;
         // Ink switches paste inside effects; end-of-step comparison avoids
         // mode writes for a use_paste swap in one commit. Disable paste before
@@ -659,10 +667,25 @@ impl App {
                 // same-commit holder swaps the same terminal-mode lifetime.
                 destination.terminal.set_raw_mode(raw_mode);
                 self.raw_mode = raw_mode;
+                if !raw_mode {
+                    runtime.pause_input();
+                }
             }
             self.destination
                 .borrow_mut()
                 .set_paste_mode(self.raw_mode && paste_mode);
+            if runtime.start_graphics(now) {
+                let mut destination = self.destination.borrow_mut();
+                let restore = destination.restore_bytes();
+                let tmux = destination.terminal.tmux();
+                for bytes in [
+                    passthrough(b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\", tmux),
+                    b"\x1b[16t".to_vec(),
+                    passthrough(b"\x1b[c", tmux),
+                ] {
+                    destination.terminal.write(&bytes, &restore);
+                }
+            }
         }
         // With no frame to wait for, control bytes leave at the end of this step.
         if !self.interactive || !(suspended || self.pending || runtime.has_work()) {
@@ -682,6 +705,7 @@ impl App {
         wake.into_iter()
             .chain(runtime.input_deadline())
             .chain(runtime.animation_deadline(self.window))
+            .chain(runtime.graphics_deadline())
             .min()
     }
 
@@ -698,12 +722,14 @@ impl App {
         if self.raw_mode
             && let Some(runtime) = &mut self.runtime
         {
+            runtime.expire_graphics(now);
             if runtime.input(bytes, now)
                 && let Some((flags, _)) = self.kitty_query.take()
             {
                 self.destination.borrow_mut().enable_kitty(flags);
             }
             if runtime.take_stop_request() {
+                runtime.finish_graphics(true);
                 self.destination.borrow_mut().terminal.stop_process();
             }
         }

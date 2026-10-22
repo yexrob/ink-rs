@@ -110,3 +110,22 @@ fn color_rules() {
         );
     }
 }
+
+#[test]
+fn graphics_excludes_terminals_without_unicode_placeholders() {
+    for (program, konsole, allowed) in [
+        (None, None, true),
+        (Some("WezTerm"), None, false),
+        (Some("ghostty"), None, true),
+        (None, Some(""), false),
+    ] {
+        assert_eq!(
+            super::graphics_allowed(|key| match key {
+                "TERM_PROGRAM" => program.map(str::to_owned),
+                "KONSOLE_VERSION" => konsole.map(str::to_owned),
+                _ => None,
+            }),
+            allowed
+        );
+    }
+}
