@@ -11,8 +11,9 @@ pub struct Graphics {
     pub cell_pixels: Option<(u16, u16)>,
 }
 
-/// The result of the terminal graphics probe.
+/// The result of the terminal graphics probe. Later versions may add protocols.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum GraphicsSupport {
     /// The probe has not finished.
     Probing,
