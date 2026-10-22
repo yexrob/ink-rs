@@ -1,8 +1,8 @@
 # 发布 0.1.5
 
 - 日期：2026-10-22
-- 状态：实施中
-- 提交：无
+- 状态：已实施
+- 提交：`2e0657e` chore: release 0.1.5
 - Brief：无，主 agent 自己做
 
 ## 背景
@@ -33,3 +33,12 @@ eink-rs 正式实施 Markdown 流式渲染（eink-rs 的记录 018），Codex �
 3. 交给用户验收，连同 eink-rs 的 Markdown 正式实施和压测结果。用户通过前不推送。
 4. 推送 main，等 CI。
 5. 打 `v0.1.5` 标签并推送，`cargo publish -p ink-rs`。
+
+## 结果
+
+- `2e0657e` 升版本号，排在 068 的提交 `4b1fe0a`、`216e816` 和结果 `4170a6b` 之后。
+- 本地：fmt、两套 feature 的 clippy 通过；默认 feature 1331 个、`--no-default-features` 1297 个测试通过；`cargo publish --dry-run` 通过。
+- 交给用户验收，连同 068 的压测结果和 eink-rs 的 Markdown demo（tmux 窗口 `ink-rs:markdown-formal`）。用户答「yes please publish」。
+- 推送 main（`ccf0fbb..2e0657e`），CI 运行 39736028886 的 7 个 job 通过。
+- `v0.1.5` 标签打在 `2e0657e`，同 v0.1.4 为轻量标签；`cargo publish -p ink-rs` 发布 0.1.5。`ink-rs-macros` 维持 0.1.1。
+- eink-rs 升级依赖见 eink-rs 的记录 018。
