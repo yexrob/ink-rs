@@ -1,8 +1,8 @@
 # `Static::from_fn`：按下标渲染应用自己存的条目
 
 - 日期：2026-10-22
-- 状态：实施中
-- 提交：无
+- 状态：已实施
+- 提交：`6159c4a` feat: add Static::from_fn for items the app stores
 - Brief：无，主 agent 自己做
 
 ## 背景
@@ -27,3 +27,9 @@ Claude 测了每帧克隆历史、转成 `Rc<[T]>` 的开销：2 千项 5µs，2
 ## 方案
 
 主 agent 自己做：`src/components.rs` 加 `from_fn`、`new` 改为调用它；design.md；fmt、两套 feature 的 clippy、全量测试；本地提交，推送随 0.1.5 交用户验收。
+
+## 结果
+
+- `6159c4a`：`Static::from_fn` 和文档注释，`Static::new` 经它构造；design.md 的 Static 一条补了说明。
+- fmt、两套 feature 的 clippy 通过；`--all-features` 1331 个、`--no-default-features` 1297 个测试通过，和 0.1.4 相同。
+- 没有推送。发布 0.1.5 另开记录，推送前交用户验收。
