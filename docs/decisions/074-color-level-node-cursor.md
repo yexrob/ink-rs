@@ -1,8 +1,8 @@
 # `use_color_level` 和锚定节点的光标
 
 - 日期：2026-10-22
-- 状态：实施中
-- 提交：无
+- 状态：已实施
+- 提交：`2da8c43` feat(runtime): add use_color_level and use_node_cursor
 - Brief：[primitives](briefs/primitives.md)
 
 ## 背景
@@ -31,3 +31,9 @@ eink-rs 的两个新组件缺 ink-rs 的原语（eink-rs 的规则 5：缺原语
 一个 Codex worker，worktree `wt/ink-primitives`。brief 见 [primitives](briefs/primitives.md)。测试三例：祖先移动时光标在同一帧跟上（这个 hook 存在的理由）；锚定的节点卸载后光标隐藏；`render_with` 和 `testing::mount` 两条路径读到设置的色深。验收：fmt；clippy 两组 feature；`--lib`；`hooks`、`runtime` 和覆盖 `use_cursor` 的测试文件。
 
 它第一个派出：eink-rs 的 `Composer`（记录 027）和 `Code`（记录 028）等它合入 main 后派出，worktree 用 `[patch.crates-io]` 指向 ink-rs 的本地 main，ink-rs 发 0.1.7 后去掉。进 0.1.7。
+
+## 结果
+
+- `2da8c43`：`Store` 记下色深，`Scope::use_color_level()` 读它。光标声明改成 `CursorDeclaration { Frame, Node }`，`use_node_cursor(node, Option<CursorPosition>)` 的偏移从节点边框盒的左上角算，绘制时用 `NodeLayout.paint_origin`（布局原点减去祖先的 `content_offset`）解析成帧坐标；`use_cursor` 和它共用 `declare_cursor`。design.md 的「样式叠加」「光标」两条更新。
+- 测试：`tests/cursor.rs` 两例（同一次绘制里光标跟随祖先移动；节点卸载、声明者留下时光标隐藏），`tests/hooks.rs` 一例（色深取自 render 和 mount 的选项）。
+- 全量测试由主 agent 在合入时跑过，通过。eink-rs 的 Composer 和 Code 在 worktree 里用 `[patch.crates-io]` 指向这个提交。没有推送，进 0.1.7。

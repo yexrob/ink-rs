@@ -1,8 +1,8 @@
 # 鼠标：SGR 1006 解析、`use_mouse` 和命中测试
 
 - 日期：2026-10-22
-- 状态：实施中
-- 提交：无
+- 状态：已实施
+- 提交：`73a421e` feat(input): report SGR mouse events on the alternate screen
 - Brief：[mouse](briefs/mouse.md)；需求：[bingo-mouse](briefs/bingo-mouse.md)
 
 ## 背景
@@ -36,3 +36,11 @@ bingo 的全屏界面要点击、拖动、滚轮和悬停。今天解析器把 `
 一个 Codex worker，worktree `wt/ink-mouse`。brief 见 [mouse](briefs/mouse.md)。测试：解析器的按下、释放、拖动、滚轮、修饰键，分片读取，超时丢弃残段；备用屏挂载下的点击坐标、Static 回放后的平移、模式字节（开启、换档、卸载和挂起关闭），内联和非 TTY 不写模式字节。验收：fmt；clippy 两组 feature 和 `x86_64-pc-windows-msvc`；`--lib`；brief 列出的输入和挂起测试。
 
 主 agent 集成：review，提交，全量测试，`docs/design.md` 的输入和恢复两节，在 tmux `ink-rs` 会话里手动点击和悬停核对。赶上 0.1.7 时随它发布，赶不上放到 0.1.8。
+
+## 结果
+
+- `73a421e`：`MouseEvent`、`MouseButton`、`MouseKind`、`MouseTracking`，`Scope::use_mouse`，`ElementMetrics::contains`。解析器识别 SGR 1006 的报告；`AppOutput` 在备用屏上按处理器的档位开关 1000/1002/1003 和 1006，退出时关掉，坐标按活区原点换算。design.md 在「粘贴」后加了「鼠标」一条。
+- 主 agent review 时改了一处：按键 8–11（`button & 128`）的报告丢弃，不当成左键。
+- 测试：`tests/hooks_use_mouse.rs` 四例，解析器三例。
+- rebase 到 074 之上时 `src/runtime/hooks.rs` 的 `use` 冲突，合并两边的导入解决。全量测试通过。
+- 终端里的手动核对未做，发 0.1.7 前在 tmux `ink-rs` 会话里补。没有推送。

@@ -1,8 +1,8 @@
 # `TestApp` 读屏：`live_frame` 和 `static_output`
 
 - 日期：2026-10-22
-- 状态：实施中
-- 提交：无
+- 状态：已实施
+- 提交：`642ef29` feat(testing): read the live frame and Static history from TestApp
 - Brief：[test-frame](briefs/test-frame.md)；需求：[bingo-test-frame](briefs/bingo-test-frame.md)
 
 ## 背景
@@ -28,3 +28,9 @@ bingo 的界面测试用 `testing::mount` 挂载整个应用，想断言屏幕�
 一个 Codex worker，worktree `wt/ink-test-frame`。brief 见 [test-frame](briefs/test-frame.md)。测试两例：内联和备用屏各一，Static 列表加一行动态内容，输入加一项并 `advance` 后，`static_output` 含新项，`live_frame` 含动态行、不含新项。备用屏一例的理由：备用屏路径把 Static 行并进动态行，记录要在合并之前。验收：fmt；clippy 两组 feature；`--lib`；brief 列出的测试文件。
 
 主 agent 集成后补结果。进 0.1.7。
+
+## 结果
+
+- `642ef29`：`App::record_frames()` 打开 `FrameRecorder`，`AppOutput::paint` 开头记下活区的帧和新写出的 `Static` 行。`TestApp::live_frame()`、`TestApp::static_output()` 读它。design.md 的「测试驱动」补了说明。
+- 测试：`tests/test_app_frames.rs` 两例。worker 报告无偏离。
+- 全量测试由主 agent 在合入时跑过，通过。没有推送，进 0.1.7。
